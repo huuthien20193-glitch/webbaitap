@@ -1,0 +1,242 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: 248 250 252;
+  --surface: 255 255 255;
+  --surface-2: 241 245 249;
+  --border: 226 232 240;
+  --text: 15 23 42;
+  --muted: 100 116 139;
+  --shadow-color: 15 23 42;
+}
+
+.dark {
+  --bg: 8 12 22;
+  --surface: 15 23 42;
+  --surface-2: 22 32 51;
+  --border: 38 50 70;
+  --text: 226 232 240;
+  --muted: 148 163 184;
+  --shadow-color: 0 0 0;
+}
+
+html {
+  color-scheme: light;
+}
+html.dark {
+  color-scheme: dark;
+}
+
+body {
+  background-color: rgb(var(--bg));
+  color: rgb(var(--text));
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Thanh cuộn mảnh, đúng tông giao diện */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--border)) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgb(var(--border));
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--muted) / 0.6);
+}
+
+@layer components {
+  .input-base {
+    @apply w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-foreground placeholder:text-muted/70 outline-none transition-all duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:shadow-[0_0_0_1px_rgb(59_130_246/0.12)] hover:border-blue-400/50;
+  }
+  .label-base {
+    @apply mb-1.5 block text-sm font-medium text-foreground;
+  }
+  .error-text {
+    @apply mt-1 text-xs text-red-500;
+  }
+}
+
+@layer utilities {
+  /* ── Hiệu ứng vào màn ─────────────────────────────── */
+  .animate-fade-up {
+    opacity: 0;
+    animation: fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  .animate-fade-in {
+    opacity: 0;
+    animation: fade-in 0.35s ease-out forwards;
+  }
+  .animate-scale-in {
+    opacity: 0;
+    animation: scale-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  .animate-slide-left {
+    animation: slide-left 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .animate-toast-in {
+    animation: toast-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  /* ── Hiệu ứng không lặp lại của trang trí ─────────── */
+  .animate-float {
+    animation: float 4.5s ease-in-out infinite;
+  }
+  .animate-float-delay {
+    animation: float 4.5s ease-in-out 1.2s infinite;
+  }
+  .animate-pulse-soft {
+    animation: pulse-soft 1.6s ease-in-out infinite;
+  }
+  .animate-shimmer {
+    background-size: 200% 100%;
+    animation: shimmer 1.6s linear infinite;
+  }
+
+  /* ── Kết cấu bề mặt ───────────────────────────────── */
+  .glass {
+    background: rgb(var(--surface) / 0.72);
+    backdrop-filter: blur(14px) saturate(1.4);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  }
+  .card-lift {
+    transition:
+      transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 0.28s ease,
+      border-color 0.28s ease;
+    will-change: transform;
+  }
+  .card-lift:hover {
+    transform: translateY(-4px);
+    box-shadow:
+      0 12px 32px -12px rgb(var(--shadow-color) / 0.14),
+      0 4px 12px -4px rgb(var(--shadow-color) / 0.08);
+  }
+  .row-lift {
+    transition:
+      transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+      background-color 0.22s ease,
+      box-shadow 0.22s ease;
+  }
+  .row-lift:hover {
+    transform: translateX(4px);
+  }
+  .interactive-pop {
+    transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease;
+  }
+  .interactive-pop:hover:active {
+    transform: scale(0.97);
+  }
+
+  .text-gradient {
+    background: linear-gradient(120deg, #2563eb 0%, #6366f1 55%, #8b5cf6 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .bg-grid {
+    background-image:
+      linear-gradient(rgb(var(--muted) / 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(var(--muted) / 0.06) 1px, transparent 1px);
+    background-size: 32px 32px;
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 40%, transparent 100%);
+    -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 40%, transparent 100%);
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes slide-left {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-7px);
+  }
+}
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.72;
+  }
+}
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* Tôn trọng người dùng muốn giảm chuyển động */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .animate-fade-up,
+  .animate-fade-in,
+  .animate-scale-in {
+    opacity: 1 !important;
+  }
+}
