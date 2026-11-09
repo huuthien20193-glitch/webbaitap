@@ -1,0 +1,20 @@
+# Render Blueprint – StudyFlow
+# Deploy tự động: Render Dashboard → New → Blueprint Instance → chọn repo webbaitap
+
+services:
+  - type: web
+    name: studyflow
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npx next start -p $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 20.14.0
+      # Supabase (TÙY CHỌN) – điền trong Render Dashboard nếu muốn dùng DB server
+      # - key: NEXT_PUBLIC_SUPABASE_URL
+      #   sync: false
+      # - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+      #   sync: false
