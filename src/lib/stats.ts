@@ -1,36 +1,41 @@
-import type { Goal, StudySession, Subject, Task } from "./types";
+import type { Course, Goal, StudySession, Task } from "./types";
 import {
   isSameDay,
   isSameMonth,
-  parseDate,
-  shiftDateStr,
   startOfWeek,
   toDateStr,
-  todayStr,
+  shiftDateStr,
 } from "./date";
 
-/** Các hàm tính toán thuần, tái sử dụng cho Dashboard/Statistics/Goals */
+/** Các hàm tính toán thuần, tái sử dụng cho Dashboard/Planner/Analytics */
 
 export function tasksForDay(tasks: Task[], dateStr: string): Task[] {
   return tasks.filter((t) => t.startDate === dateStr || t.dueDate === dateStr);
 }
 
 export function minutesInDay(sessions: StudySession[], dateStr: string): number {
-  return sessions
-    .filter((s) => toDateStr(new Date(s.startedAt)) === dateStr)
-    .reduce((sum, s) => sum + s.durationSec, 0) / 60;
+  return (
+    sessions.filter((s) => toDateStr(new Date(s.startedAt)) === dateStr).reduce((sum, s) => sum + s.durationSec, 0) /
+    60
+  );
 }
 
 export function minutesInRange(sessions: StudySession[], fromStr: string, toStr: string): number {
-  return sessions
-    .filter((s) => {
-      const d = toDateStr(new Date(s.startedAt));
-      return d >= fromStr && d <= toStr;
-    })
-    .reduce((sum, s) => sum + s.durationSec, 0) / 60;
+  return (
+    sessions
+      .filter((s) => {
+        const d = toDateStr(new Date(s.startedAt));
+        return d >= fromStr && d <= toStr;
+      })
+      .reduce((sum, s) => sum + s.durationSec, 0) / 60
+  );
 }
 
-export function seriesDailyMinutes(sessions: StudySession[], days: number, endDate = new Date()): { date: string; label: string; minutes: number }[] {
+export function seriesDailyMinutes(
+  sessions: StudySession[],
+  days: number,
+  endDate = new Date()
+): { date: string; label: string; minutes: number }[] {
   const out: { date: string; label: string; minutes: number }[] = [];
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(endDate);
@@ -42,7 +47,11 @@ export function seriesDailyMinutes(sessions: StudySession[], days: number, endDa
   return out;
 }
 
-export function seriesDailyCompleted(tasks: Task[], days: number, endDate = new Date()): { date: string; label: string; count: number }[] {
+export function seriesDailyCompleted(
+  tasks: Task[],
+  days: number,
+  endDate = new Date()
+): { date: string; label: string; count: number }[] {
   const out: { date: string; label: string; count: number }[] = [];
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(endDate);
@@ -76,20 +85,25 @@ export function weekPerformance(sessions: StudySession[], tasks: Task[], weeks: 
   return out;
 }
 
-export function minutesBySubject(sessions: StudySession[], subjects: Subject[], fromStr?: string, toStrStr?: string): { id: string; name: string; color: string; minutes: number }[] {
+export function minutesByCourse(
+  sessions: StudySession[],
+  courses: Course[],
+  fromStr?: string,
+  toStr?: string
+): { id: string; name: string; color: string; minutes: number }[] {
   const totals = new Map<string, number>();
   for (const s of sessions) {
     const d = toDateStr(new Date(s.startedAt));
     if (fromStr && d < fromStr) continue;
-    if (toStrStr && d > toStrStr) continue;
-    const key = s.subjectId ?? "_none";
+    if (toStr && d > toStr) continue;
+    const key = s.courseId ?? "_none";
     totals.set(key, (totals.get(key) ?? 0) + s.durationSec);
   }
-  const out = subjects.map((s) => ({
-    id: s.id,
-    name: s.name,
-    color: s.color,
-    minutes: Math.round(((totals.get(s.id) ?? 0) / 60) * 10) / 10,
+  const out = courses.map((c) => ({
+    id: c.id,
+    name: c.name,
+    color: c.color,
+    minutes: Math.round(((totals.get(c.id) ?? 0) / 60) * 10) / 10,
   }));
   const none = totals.get("_none") ?? 0;
   if (none > 0) out.push({ id: "_none", name: "Không môn", color: "#94a3b8", minutes: Math.round((none / 60) * 10) / 10 });
@@ -106,22 +120,27 @@ export function taskStats(tasks: Task[]) {
   };
 }
 
-export interface SubjectProgress {
-  subject: Subject;
+export interface CourseProgress {
+  course: Course;
   total: number;
   done: number;
   rate: number;
+  /** Trung bình mức độ hiểu các chương (0–100). null khi chưa có chương nào */
+  chapterScore: number | null;
 }
 
-export function subjectProgress(subjects: Subject[], tasks: Task[]): SubjectProgress[] {
-  return subjects.map((s) => {
-    const own = tasks.filter((t) => t.subjectId === s.id);
+export function courseProgress(courses: Course[], tasks: Task[], chapters: { courseId: string; understanding: number }[]): CourseProgress[] {
+  return courses.map((c) => {
+    const own = tasks.filter((t) => t.courseId === c.id);
     const done = own.filter((t) => t.status === "done").length;
+    const chs = chapters.filter((ch) => ch.courseId === c.id);
+    const chapterScore = chs.length === 0 ? null : Math.round((chs.reduce((a, b) => a + b.understanding, 0) / (chs.length * 5)) * 100);
     return {
-      subject: s,
+      course: c,
       total: own.length,
       done,
       rate: own.length === 0 ? 0 : Math.round((done / own.length) * 100),
+      chapterScore,
     };
   });
 }
@@ -144,7 +163,6 @@ export function goalProgress(goal: Goal, tasks: Task[], sessions: StudySession[]
     const target = Math.max(1, goal.target);
     return { goal, current, target, percent: Math.min(100, Math.round((current / target) * 100)), achieved: current >= target };
   }
-  // Tuần: Thứ 2 → Chủ nhật
   const ws = startOfWeek(now);
   const wsStr = toDateStr(ws);
   const weStr = toDateStr(new Date(ws.getTime() + 6 * 86_400_000));
@@ -160,7 +178,7 @@ export function goalProgress(goal: Goal, tasks: Task[], sessions: StudySession[]
   return { goal, current, target, percent: Math.min(100, Math.round((current / target) * 100)), achieved: current >= target };
 }
 
-/** Tasks trong "hôm nay" theo thứ tự ưu tiên, chưa hoàn thành lên trước */
+/** Tasks trong "hôm nay", chưa hoàn thành lên trước */
 export function orderTasks(tasks: Task[]): Task[] {
   const weight: Record<string, number> = { todo: 0, in_progress: 1, done: 2 };
   return [...tasks].sort((a, b) => {
@@ -193,6 +211,31 @@ export function upcomingDeadlines(tasks: Task[], days = 7, now = new Date()): Ta
   return orderTasks(tasks.filter((t) => t.status !== "done" && t.dueDate >= today && t.dueDate <= limit)).slice(0, 8);
 }
 
+/** Chûỗi ngày học liên tục (mỗi ngày có ≥1 phiên > 0 phút). */
+export function studyStreak(sessions: StudySession[], now = new Date()): number {
+  const days = new Set(
+    sessions.filter((s) => s.durationSec > 0).map((s) => toDateStr(new Date(s.startedAt)))
+  );
+  let streak = 0;
+  const cursor = new Date(now);
+  cursor.setHours(0, 0, 0, 0);
+  if (!days.has(toDateStr(cursor))) {
+    // Hôm nay chưa học → chuỗi tính từ hôm qua trở về trước
+    cursor.setDate(cursor.getDate() - 1);
+    if (!days.has(toDateStr(cursor))) return 0;
+  }
+  while (days.has(toDateStr(cursor))) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+/** Số flashcard đến hạn (hôm nay và các hôm đã quá hạn) */
+export function dueFlashcards<T extends { dueDate: string }>(cards: T[], today: string): T[] {
+  return cards.filter((c) => c.dueDate <= today);
+}
+
 /** Tổng số phút học của tháng hiện tại */
 export function minutesThisMonth(sessions: StudySession[], now = new Date()): number {
   let total = 0;
@@ -201,9 +244,3 @@ export function minutesThisMonth(sessions: StudySession[], now = new Date()): nu
   }
   return Math.round(total / 60);
 }
-
-export function parseLocal(dateStr: string): Date {
-  return parseDate(dateStr);
-}
-
-export const todayString = todayStr;

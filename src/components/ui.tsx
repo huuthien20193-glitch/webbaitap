@@ -14,9 +14,9 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantCls: Record<Variant, string> = {
-  primary: "bg-gradient-to-b from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-sm shadow-blue-600/20 focus-visible:ring-blue-500/40",
-  secondary: "bg-surface-2 text-foreground border border-border hover:bg-surface-2/70 hover:border-blue-300/50 focus-visible:ring-blue-500/30",
-  ghost: "text-muted hover:text-foreground hover:bg-surface-2 focus-visible:ring-blue-500/30",
+  primary: "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white hover:from-indigo-600 hover:to-indigo-700 shadow-sm shadow-indigo-600/20 focus-visible:ring-indigo-500/40",
+  secondary: "bg-surface-2 text-foreground border border-border hover:bg-surface-2/70 hover:border-indigo-300/50 focus-visible:ring-indigo-500/30",
+  ghost: "text-muted hover:text-foreground hover:bg-surface-2 focus-visible:ring-indigo-500/30",
   danger: "bg-gradient-to-b from-red-500 to-red-600 text-white hover:from-red-600 hover:to-red-700 shadow-sm shadow-red-600/20 focus-visible:ring-red-500/40",
 };
 
@@ -51,7 +51,7 @@ export function Spinner({ className }: { className?: string }) {
 export function LoadingBlock({ label = "Đang tải..." }: { label?: string }) {
   return (
     <div className="flex h-64 flex-col items-center justify-center gap-3 text-muted">
-      <Spinner className="h-7 w-7 text-blue-500" />
+      <Spinner className="h-7 w-7 text-indigo-500" />
       <p className="text-sm">{label}</p>
     </div>
   );
@@ -130,7 +130,7 @@ export function EmptyState({ icon, title, hint }: { icon: ReactNode; title: stri
   );
 }
 
-export function ProgressBar({ percent, color = "bg-blue-500" }: { percent: number; color?: string }) {
+export function ProgressBar({ percent, color = "bg-indigo-500" }: { percent: number; color?: string }) {
   const p = Math.max(0, Math.min(100, percent));
   return (
     <div className="h-2 w-full overflow-hidden rounded-full bg-surface-2">

@@ -44,7 +44,7 @@ export function DailyMinutesChart({ data }: { data: DailyPoint[] }) {
           cursor={{ fill: "rgb(var(--surface-2) / 0.6)" }}
           formatter={(value: number | string) => [`${value} phút`, "Thời gian học"]}
         />
-        <Bar dataKey="minutes" fill="#3b82f6" radius={[6, 6, 0, 0]} maxBarSize={38} />
+        <Bar dataKey="minutes" fill="#6366f1" radius={[6, 6, 0, 0]} maxBarSize={38} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -66,7 +66,7 @@ export function CompletedTasksChart({ data }: { data: CountPoint[] }) {
           contentStyle={tooltipStyle}
           formatter={(value: number | string) => [value, "Nhiệm vụ hoàn thành"]}
         />
-        <Line type="monotone" dataKey="count" stroke="#3b82f6" strokeWidth={2.5} dot={{ r: 3, fill: "#3b82f6" }} activeDot={{ r: 5 }} />
+        <Line type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={2.5} dot={{ r: 3, fill: "#6366f1" }} activeDot={{ r: 5 }} />
       </LineChart>
     </ResponsiveContainer>
   );
@@ -112,7 +112,7 @@ export function WeeklyCompareChart({ data }: { data: WeekPoint[] }) {
         <YAxis tick={axisStyle} tickLine={false} axisLine={false} width={44} />
         <Tooltip contentStyle={tooltipStyle} />
         <Legend wrapperStyle={{ fontSize: 12, color: "rgb(var(--muted))" }} />
-        <Bar name="Thời gian học (phút)" dataKey="minutes" fill="#3b82f6" radius={[6, 6, 0, 0]} maxBarSize={42} />
+        <Bar name="Thời gian học (phút)" dataKey="minutes" fill="#6366f1" radius={[6, 6, 0, 0]} maxBarSize={42} />
         <Bar name="Nhiệm vụ hoàn thành" dataKey="completed" fill="#10b981" radius={[6, 6, 0, 0]} maxBarSize={42} />
       </BarChart>
     </ResponsiveContainer>

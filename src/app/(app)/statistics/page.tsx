@@ -12,7 +12,7 @@ import {
 import { useData } from "@/lib/data";
 import { formatMinutes, toDateStr } from "@/lib/date";
 import {
-  minutesBySubject,
+  minutesByCourse,
   minutesInRange,
   minutesThisMonth,
   seriesDailyCompleted,
@@ -25,14 +25,14 @@ import { cn } from "@/lib/utils";
 type RangeMode = 7 | 30;
 
 export default function StatisticsPage() {
-  const { loading, tasks, sessions, subjects } = useData();
+  const { loading, tasks, sessions, courses } = useData();
   const [range, setRange] = useState<RangeMode>(7);
 
   const now = useMemo(() => new Date(), []);
 
   const dailyMinutes = useMemo(() => seriesDailyMinutes(sessions, range, now), [sessions, range, now]);
   const dailyCompleted = useMemo(() => seriesDailyCompleted(tasks, range, now), [tasks, range, now]);
-  const subjectSlices = useMemo(() => minutesBySubject(sessions, subjects).slice(0, 6), [sessions, subjects]);
+  const subjectSlices = useMemo(() => minutesByCourse(sessions, courses).slice(0, 6), [sessions, courses]);
   const weekly = useMemo(() => weekPerformance(sessions, tasks, 4, now), [sessions, tasks, now]);
 
   const stats = useMemo(() => {
@@ -73,13 +73,13 @@ export default function StatisticsPage() {
         <div className="flex rounded-lg border border-border bg-surface-2 p-1">
           <button
             onClick={() => setRange(7)}
-            className={cn("rounded-md px-4 py-1.5 text-sm font-medium transition-colors", range === 7 ? "bg-blue-600 text-white shadow-card" : "text-muted hover:text-foreground")}
+            className={cn("rounded-md px-4 py-1.5 text-sm font-medium transition-colors", range === 7 ? "bg-indigo-600 text-white shadow-card" : "text-muted hover:text-foreground")}
           >
             7 ngày
           </button>
           <button
             onClick={() => setRange(30)}
-            className={cn("rounded-md px-4 py-1.5 text-sm font-medium transition-colors", range === 30 ? "bg-blue-600 text-white shadow-card" : "text-muted hover:text-foreground")}
+            className={cn("rounded-md px-4 py-1.5 text-sm font-medium transition-colors", range === 30 ? "bg-indigo-600 text-white shadow-card" : "text-muted hover:text-foreground")}
           >
             30 ngày
           </button>
@@ -89,7 +89,7 @@ export default function StatisticsPage() {
       {/* Thẻ số liệu */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {cards.map((c, i) => (
-          <Card key={c.label} className="card-lift animate-fade-up p-5 hover:border-blue-300/60 dark:hover:border-blue-500/30" style={{ animationDelay: `${i * 70}ms` }}>
+          <Card key={c.label} className="card-lift animate-fade-up p-5 hover:border-indigo-300/60 dark:hover:border-indigo-500/30" style={{ animationDelay: `${i * 70}ms` }}>
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-sm text-muted">{c.label}</p>
@@ -146,7 +146,7 @@ export default function StatisticsPage() {
       {/* Tổng quan chung */}
       <Card className="p-5">
         <h3 className="mb-4 flex items-center gap-2 font-semibold">
-          <TrendingUp className="h-4 w-4 text-blue-500" /> Tiến độ tổng thể
+          <TrendingUp className="h-4 w-4 text-indigo-500" /> Tiến độ tổng thể
         </h3>
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           <div>
@@ -165,7 +165,7 @@ export default function StatisticsPage() {
             </div>
             <div className="flex flex-wrap gap-2 text-xs">
               <span className="rounded-full bg-emerald-100 px-3 py-1 font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">Đã xong: {stats.ts.done}</span>
-              <span className="rounded-full bg-blue-100 px-3 py-1 font-medium text-blue-700 dark:bg-blue-500/15 dark:text-blue-400">Đang làm: {tasks.filter((t) => t.status === "in_progress").length}</span>
+              <span className="rounded-full bg-indigo-100 px-3 py-1 font-medium text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400">Đang làm: {tasks.filter((t) => t.status === "in_progress").length}</span>
               <span className="rounded-full bg-surface-2 px-3 py-1 text-muted">Chưa bắt đầu: {tasks.filter((t) => t.status === "todo").length}</span>
             </div>
           </div>

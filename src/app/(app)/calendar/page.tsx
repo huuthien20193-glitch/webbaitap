@@ -24,7 +24,7 @@ type ViewMode = "day" | "week" | "month";
 const MODE_LABEL: Record<ViewMode, string> = { day: "Ngày", week: "Tuần", month: "Tháng" };
 
 export default function CalendarPage() {
-  const { loading, tasks, subjects, deleteTask } = useData();
+  const { loading, tasks, courses, deleteTask } = useData();
   const [view, setView] = useState<ViewMode>("month");
   const [cursor, setCursor] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState(() => todayStr());
@@ -32,7 +32,7 @@ export default function CalendarPage() {
   const [editing, setEditing] = useState<Task | null>(null);
   const [prefillDate, setPrefillDate] = useState<string | null>(null);
 
-  const subjectMap = useMemo(() => new Map(subjects.map((s) => [s.id, s])), [subjects]);
+  const courseMap = useMemo(() => new Map(courses.map((s) => [s.id, s])), [courses]);
   const today = todayStr();
 
   const tasksFor = useMemo(() => {
@@ -131,7 +131,7 @@ export default function CalendarPage() {
                 onClick={() => setView(m)}
                 className={cn(
                   "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-                  view === m ? "bg-blue-600 text-white shadow-card" : "text-muted hover:text-foreground"
+                  view === m ? "bg-indigo-600 text-white shadow-card" : "text-muted hover:text-foreground"
                 )}
               >
                 {MODE_LABEL[m]}
@@ -186,14 +186,14 @@ export default function CalendarPage() {
                   className={cn(
                     "group flex min-h-[92px] flex-col rounded-lg border p-1.5 text-left transition-colors sm:min-h-[110px]",
                     inMonth ? "border-border bg-surface" : "border-transparent bg-surface-2/40 text-muted",
-                    isSelected ? "ring-2 ring-blue-500" : "hover:bg-surface-2"
+                    isSelected ? "ring-2 ring-indigo-500" : "hover:bg-surface-2"
                   )}
                   title={`Thêm nhiệm vụ ngày ${formatFullDate(ds)}`}
                 >
                   <span
                     className={cn(
                       "mb-1 flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold",
-                      isToday && "bg-blue-600 text-white",
+                      isToday && "bg-indigo-600 text-white",
                       !isToday && inMonth && "text-foreground",
                       !isToday && !inMonth && "text-muted"
                     )}
@@ -202,7 +202,7 @@ export default function CalendarPage() {
                   </span>
                   <div className="flex-1 space-y-1 overflow-hidden">
                     {dayTasks.slice(0, 3).map((t) => {
-                      const s = t.subjectId ? subjectMap.get(t.subjectId) : null;
+                      const s = t.courseId ? courseMap.get(t.courseId) : null;
                       const overdue = t.status !== "done" && t.dueDate < today;
                       return (
                         <span
@@ -243,15 +243,15 @@ export default function CalendarPage() {
             const dayTasks = tasksFor.get(ds) ?? [];
             const isToday = ds === today;
             return (
-              <Card key={ds} className={cn("flex min-h-[180px] flex-col p-3", isToday && "ring-2 ring-blue-500")}>
+              <Card key={ds} className={cn("flex min-h-[180px] flex-col p-3", isToday && "ring-2 ring-indigo-500")}>
                 <div className="mb-2 flex items-center justify-between">
                   <div>
                     <p className="text-xs text-muted">{SHORT_DAYS[(d.getDay() + 6) % 7]}</p>
-                    <p className={cn("text-sm font-semibold", isToday && "text-blue-600 dark:text-blue-400")}>
+                    <p className={cn("text-sm font-semibold", isToday && "text-indigo-600 dark:text-indigo-400")}>
                       {d.getDate()}/{d.getMonth() + 1}
                     </p>
                   </div>
-                  <button onClick={() => openCreate(ds)} className="rounded-md p-1 text-muted hover:bg-surface-2 hover:text-blue-500" aria-label={`Thêm nhiệm vụ ngày ${ds}`}>
+                  <button onClick={() => openCreate(ds)} className="rounded-md p-1 text-muted hover:bg-surface-2 hover:text-indigo-500" aria-label={`Thêm nhiệm vụ ngày ${ds}`}>
                     <Plus className="h-4 w-4" />
                   </button>
                 </div>
@@ -260,7 +260,7 @@ export default function CalendarPage() {
                     <p className="text-[11px] text-muted">—</p>
                   ) : (
                     dayTasks.map((t) => {
-                      const s = t.subjectId ? subjectMap.get(t.subjectId) : null;
+                      const s = t.courseId ? courseMap.get(t.courseId) : null;
                       const overdue = t.status !== "done" && t.dueDate < today;
                       return (
                         <button
@@ -289,7 +289,7 @@ export default function CalendarPage() {
         <Card className="p-5">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="flex items-center gap-2 text-base font-semibold capitalize">
-              <CalendarRange className="h-4 w-4 text-blue-500" /> {formatFullDate(toDateStr(cursor))}
+              <CalendarRange className="h-4 w-4 text-indigo-500" /> {formatFullDate(toDateStr(cursor))}
             </h3>
             <Button onClick={() => openCreate(toDateStr(cursor))}>
               <Plus className="h-4 w-4" /> Thêm cho ngày này
@@ -300,7 +300,7 @@ export default function CalendarPage() {
           ) : (
             <ul className="space-y-2.5">
               {(tasksFor.get(toDateStr(cursor)) ?? []).map((t) => {
-                const s = t.subjectId ? subjectMap.get(t.subjectId) : null;
+                const s = t.courseId ? courseMap.get(t.courseId) : null;
                 const overdue = t.status !== "done" && t.dueDate < today;
                 return (
                   <li
@@ -320,7 +320,7 @@ export default function CalendarPage() {
                         t.status === "done"
                           ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
                           : t.status === "in_progress"
-                            ? "bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400"
+                            ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400"
                             : "bg-surface-2 text-muted"
                       }
                     >
@@ -328,7 +328,7 @@ export default function CalendarPage() {
                     </Badge>
                     <button
                       onClick={() => openEdit(t)}
-                      className="rounded-md px-2 py-1 text-xs font-medium text-blue-600 hover:bg-surface hover:underline dark:text-blue-400"
+                      className="rounded-md px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-surface hover:underline dark:text-indigo-400"
                     >
                       Sửa
                     </button>

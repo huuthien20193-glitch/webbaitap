@@ -111,12 +111,12 @@ function Section({
         {rows.map((row, i) => (
           <Card
             key={row.goal.id}
-            className={cn("group card-lift animate-fade-up relative p-5 hover:border-emerald-300/60 dark:hover:border-emerald-500/30", row.achieved && "ring-2 ring-emerald-500/60")}
+            className={cn("group card-lift animate-fade-up relative p-5 hover:border-indigo-300/60 dark:hover:border-indigo-500/30", row.achieved && "ring-2 ring-emerald-500/60")}
             style={{ animationDelay: `${i * 80}ms` }}
           >
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-3">
-                <span className={cn("flex h-10 w-10 items-center justify-center rounded-xl", row.achieved ? "bg-emerald-600 text-white" : "bg-blue-600 text-white")}>
+                <span className={cn("flex h-10 w-10 items-center justify-center rounded-xl", row.achieved ? "bg-emerald-600 text-white" : "bg-gradient-to-br from-indigo-500 to-violet-600 text-white")}>
                   {row.achieved ? <Check className="h-5 w-5" /> : <Target className="h-5 w-5" />}
                 </span>
                 <div>
@@ -131,7 +131,7 @@ function Section({
                 </div>
               </div>
               <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                <button onClick={() => onEdit(row.goal)} className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-blue-500" aria-label="Sửa mục tiêu" title="Sửa">
+                <button onClick={() => onEdit(row.goal)} className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-indigo-500" aria-label="Sửa mục tiêu" title="Sửa">
                   <Pencil className="h-4 w-4" />
                 </button>
                 <button onClick={() => onDelete(row.goal)} className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-red-500" aria-label="Xóa mục tiêu" title="Xóa">
@@ -150,7 +150,7 @@ function Section({
                   row.achieved
                     ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
                     : row.percent >= 50
-                      ? "bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400"
+                      ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400"
                       : "bg-surface-2 text-muted"
                 )}
               >
@@ -158,7 +158,7 @@ function Section({
               </Badge>
             </div>
             <div className="mt-2.5">
-              <ProgressBar percent={row.percent} color={row.achieved ? "bg-emerald-500" : "bg-blue-500"} />
+              <ProgressBar percent={row.percent} color={row.achieved ? "bg-emerald-500" : "bg-gradient-to-r from-indigo-500 to-violet-500"} />
             </div>
             {row.goal.note && <p className="mt-3 rounded-lg bg-surface-2/60 p-2.5 text-xs text-muted">“{row.goal.note}”</p>}
           </Card>
