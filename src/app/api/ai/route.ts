@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 
 /**
- * MODULE D – Proxy Gemini server-side.
+ * MODULE D – Proxy AI server-side.
  * - API key CHỈ nằm ở backend (env GEMINI_API_KEY), frontend gọi qua route này.
- * - Giới hạn độ dài dữ liệu vào/out; reject body quá lớn.
- * - JSON guard: các mode trả JSON được parse có fallback (tách khối ```json / {...}).
- * - Xử lý lỗi API (403/429/5xx/timeout) và trả message thân thiện.
+ * - Chưa có key → dùng AI CƠ SỞ (offline, engine ai-local.ts, không cần key).
+ * - Có key nhưng Gemini lỗi/timeout → tự rơi về AI cơ sở (fallbackNote kèm theo).
+ * - Giới hạn độ dài dữ liệu vào/out; JSON guard (tách khối ```json / {...}).
  */
+
+import { runLocalAI, type LocalMode } from "@/lib/ai-local";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -132,34 +134,66 @@ async function callGemini(system: string, turns: Turn[], json: boolean): Promise
 
 /* ── Handler ───────────────────────────────────────────────── */
 
+function parseCtx(v: unknown): Record<string, unknown> {
+  if (typeof v === "string" && v.trim().startsWith("{")) {
+    try {
+      const j: unknown = JSON.parse(v);
+      return typeof j === "object" && j !== null && !Array.isArray(j) ? (j as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+}
+
+interface AIBody {
+  mode?: Mode;
+  prompt?: string;
+  context?: unknown;
+  messages?: IncomingMessage[];
+  data?: unknown;
+}
+
 export async function POST(req: NextRequest) {
+  let body: AIBody | null = null;
   try {
-    if (!API_KEY) {
-      return NextResponse.json(
-        { error: "AI chưa được cấu hình: thêm GEMINI_API_KEY vào biến môi trường phía server." },
-        { status: 503 }
-      );
-    }
+    body = (await req.json().catch(() => null)) as AIBody | null;
+  } catch {
+    body = null;
+  }
 
-    const body = (await req.json().catch(() => null)) as
-      | { mode?: Mode; prompt?: string; context?: unknown; messages?: IncomingMessage[]; data?: unknown }
-      | null;
+  if (!body || !body.mode || !(body.mode in MODE_PROMPT)) {
+    return NextResponse.json({ error: "Mode không hợp lệ" }, { status: 400 });
+  }
+  const mode = body.mode;
+  const jsonMode = mode === "questions" || mode === "flashcards" || mode === "plan" || mode === "suggestions";
+  const messages = clipMessages(Array.isArray(body.messages) ? body.messages : []);
 
-    if (!body || !body.mode || !(body.mode in MODE_PROMPT)) {
-      return NextResponse.json({ error: "Mode không hợp lệ" }, { status: 400 });
-    }
-    const mode = body.mode;
-    const jsonMode = mode === "questions" || mode === "flashcards" || mode === "plan" || mode === "suggestions";
+  /* ── Chưa cấu hình GEMINI_API_KEY → AI cơ sở (offline, không cần key) ── */
+  if (!API_KEY) {
+    const local = runLocalAI({
+      mode: mode as LocalMode,
+      prompt: trunc(body.prompt, 2000),
+      context: body.context ?? "",
+      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    });
+    const payload: Record<string, unknown> = { mode, engine: "local" };
+    if (local.text) payload.text = local.text;
+    if (local.json !== undefined) payload.json = local.json;
+    if (local.error) payload.error = local.error;
+    return NextResponse.json(payload, { status: 200 });
+  }
 
+  /* ── Có key → Gemini ── */
+  try {
     const turns: Turn[] = [];
 
     if (mode === "chat") {
-      const msgs = clipMessages(Array.isArray(body.messages) ? body.messages : []);
-      if (msgs.length === 0) return NextResponse.json({ error: "Thiếu nội dung trò chuyện" }, { status: 400 });
+      if (messages.length === 0) return NextResponse.json({ error: "Thiếu nội dung trò chuyện" }, { status: 400 });
       // Lịch sử → turn đúng role của Gemini ("model" thay cho "assistant");
       // tin nhắn cuối (user) là phần cần trả lời.
-      const history = msgs.slice(0, -1);
-      const last = msgs[msgs.length - 1];
+      const history = messages.slice(0, -1);
+      const last = messages[messages.length - 1];
       for (const m of history) {
         turns.push({ role: m.role === "assistant" ? "model" : "user", text: m.content });
       }
@@ -179,15 +213,32 @@ export async function POST(req: NextRequest) {
       const parsed = extractJson(text);
       if (parsed.error) {
         // Trả về dạng text thay vì JSON khi parse lỗi — UI vẫn hiển thị được
-        return NextResponse.json({ mode, text, parseWarning: parsed.error });
+        return NextResponse.json({ mode, engine: "gemini", text, parseWarning: parsed.error });
       }
-      return NextResponse.json({ mode, json: parsed.data });
+      return NextResponse.json({ mode, engine: "gemini", json: parsed.data });
     }
 
-    return NextResponse.json({ mode, text });
+    return NextResponse.json({ mode, engine: "gemini", text });
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Lỗi AI không xác định";
-    const status = e instanceof Error && e.name === "AbortError" ? 504 : 502;
-    return NextResponse.json({ error: status === 504 ? "AI phản hồi chậm, thử lại nhé." : message }, { status });
+    /* ── Gemini lỗi (timeout/429/5xx/…) → rơi về AI cơ sở, vẫn có kết quả ── */
+    const detail = e instanceof Error ? e.message : "Lỗi AI không xác định";
+    const aborted = e instanceof Error && e.name === "AbortError";
+    const local = runLocalAI({
+      mode: mode as LocalMode,
+      prompt: trunc(body.prompt, 2000),
+      context: body.context ?? "",
+      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    });
+    const payload: Record<string, unknown> = {
+      mode,
+      engine: "local",
+      fallbackNote: (aborted ? "AI trả lời chậm, " : `Gemini lỗi (${detail}), `) + "đang dùng AI cơ sở (offline).",
+    };
+    if (local.error) payload.error = local.error;
+    else {
+      if (local.text) payload.text = local.text;
+      if (local.json !== undefined) payload.json = local.json;
+    }
+    return NextResponse.json(payload, { status: 200 });
   }
 }
