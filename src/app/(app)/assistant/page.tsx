@@ -113,6 +113,10 @@ export default function AssistantPage() {
       examResults: examResults.slice(0, 10).map((r) => ({ exam: exams.find((x) => x.id === r.examId)?.title ?? "", score: r.score })),
       flashcardsDue: flashcards.filter((f) => f.dueDate <= todayStr()).length,
       openTaskTitles: tasks.filter((t) => t.status !== "done").slice(0, 25).map((t) => t.title),
+      openTasks: tasks
+        .filter((t) => t.status !== "done")
+        .slice(0, 12)
+        .map((t) => ({ title: t.title, dueDate: t.dueDate, priority: t.priority, estMinutes: t.estMinutes, progress: t.progress })),
       weakestChapters: chapters.filter((c) => c.understanding <= 2).slice(0, 8).map((c) => ({ course: courseMap.get(c.courseId)?.name ?? "", chapter: c.title })),
     }),
     [courses, tasks, sessions, exams, examResults, chapters, flashcards, courseMap]

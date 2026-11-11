@@ -708,7 +708,7 @@ export function localChat(input: LocalInput): LocalOutput {
     }
 
     const closing =
-      overdue > 0
+      (overdue > 0
         ? pick(
             [
               "Việc quá hạn là ưu tiên số 1 — mở Planner, làm ngay dòng đầu tiên trong hàng đợi là gỡ được. Chỉ cần 25 phút thôi 💪",
@@ -718,12 +718,69 @@ export function localChat(input: LocalInput): LocalOutput {
           )
         : dueCards > 0
           ? "Không quá nặng nhọc đâu — dành 10 phút lướt flashcard ở trang Ôn tập là giữ được nhịp hôm nay."
-          : "Muốn mình bày sẵn lịch cho 7 ngày tới không? Vào Planner → tab **AI** là có ngay.";
+          : "Muốn mình bày sẵn lịch cho 7 ngày tới không? Vào Planner → tab **AI** là có ngay.") +
+      " " +
+      pick(["Bạn muốn mình nói kỹ phần nào trước?", "Muốn mình đi sâu vào mục nào — quá hạn, kỳ thi hay flashcard?"], seed + 2);
     lines.push("", closing);
     return { text: lines.join("\n") + tail };
   }
 
-  if (/kế\s*hoạch|học\s*gì|nên\s*làm|ưu\s*tiên|phân\s*công|lịch\s*học/.test(lastUser)) {
+  if (/kế\s*hoạch|xếp\s*(giúp|lịch|cho)|lập\s*lịch|lịch\s*học|học\s*gì|nên\s*làm|ưu\s*tiên|phân\s*công/.test(lastUser)) {
+    const open = Array.isArray(ctx.openTasks) ? (ctx.openTasks as Record<string, unknown>[]) : [];
+    const schedulable = open
+      .filter((t) => clampText(t.title, 60) && Number(t.estMinutes) > 0)
+      .map((t) => ({
+        title: clampText(t.title, 60),
+        due: /^[12]\d{3}-[01]\d-[0-3]\d$/.test(clampText(t.dueDate, 10)) ? clampText(t.dueDate, 10) : today,
+        priority: clampText(t.priority, 10) || "medium",
+        minutes: Math.min(300, Math.max(15, Math.round(Number(t.estMinutes) || 30))),
+        progress: Math.min(100, Math.max(0, Math.round(Number(t.progress) || 0))),
+      }))
+      .sort((a, b) => {
+        const pa = a.priority === "high" ? 3 : a.priority === "low" ? 1 : 2;
+        const pb = b.priority === "high" ? 3 : b.priority === "low" ? 1 : 2;
+        if (a.due !== b.due) return a.due < b.due ? -1 : 1;
+        if (pa !== pb) return pb - pa;
+        return b.minutes - a.minutes;
+      });
+
+    if (schedulable.length > 0) {
+      const DAY_BUDGET = 150;
+      const dayLabels = ["hôm nay", "ngày mai", "ngày mốt", `+3 ngày`, `+4 ngày`];
+      const buckets: { label: string; date: string; items: { title: string; minutes: number; progress: number; overdue: boolean }[] }[] = [];
+      let bi = 0;
+      let load = 0;
+      for (const t of schedulable.slice(0, 10)) {
+        if (bi >= dayLabels.length) break;
+        if (buckets.length === 0 || load + t.minutes > DAY_BUDGET) {
+          if (buckets.length === dayLabels.length) break;
+          buckets.push({ label: dayLabels[buckets.length], date: shiftDateStr(today, buckets.length), items: [] });
+          load = 0;
+          bi = buckets.length - 1;
+        }
+        const overdue = t.due < today;
+        buckets[bi].items.push({ title: t.title, minutes: t.minutes, progress: t.progress, overdue });
+        load += t.minutes;
+      }
+      const DOW = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
+      const lines: string[] = [
+        pick(["Ok, mình bày lịch luôn dựa trên nhiệm vụ thật của bạn nhé:", "Được — đây là lịch mình xếp từ dữ liệu hiện tại:"], seed),
+      ];
+      buckets.forEach((b) => {
+        const dow = DOW[new Date(`${b.date}T00:00:00`).getDay()];
+        lines.push(`**${b.label}** (${dow}): ${b.items.map((i) => `**${i.title}**${i.overdue ? " ⚠️(quá hạn)" : ""} ~${i.minutes}p${i.progress > 0 ? ` (dở ${i.progress}%)` : ""}`).join(" → ")}`);
+      });
+      const rest = schedulable.slice(10);
+      if (rest.length > 0) lines.push(`(Còn ${rest.length} việc nữa — xem đủ ở **Planner → hàng đợi ưu tiên**.)`);
+      lines.push(
+        "",
+        "Lịch này ưu tiên deadline gần + mức quan trọng trước. Muốn kèm khung giờ cụ thể trong ngày thì vào **Planner → tab AI**.",
+        "",
+        pick(["Bắt đầu được chưa, hay bạn muốn dồn việc nào lên trước?", "Bạn thấy thứ tự này ổn chưa — muốn đổi gì cứ nói nhé!"], seed + 1)
+      );
+      return { text: lines.join("\n") + tail };
+    }
+
     const first = Number.isFinite(openTasks) && openTasks > 0 ? `Hiện bạn có ${openTasks} việc đang mở — bắt đầu từ dòng đầu của hàng đợi Planner là chuẩn nhất (điểm số cao nhất theo thuật toán). ` : "";
     return {
       text:
@@ -764,8 +821,8 @@ export function localChat(input: LocalInput): LocalOutput {
       ...withDays.slice(0, 5).map((e, i) => `${i + 1}. **${e.t}**${e.c ? ` (${e.c})` : ""} — ${e.d}${e.days === 0 ? " (hôm nay!)" : `, còn ${e.days} ngày`}`),
       "",
       withDays.length > 0 && withDays[0].days <= 7
-        ? `**${withDays[0].days === 0 ? "Thi ngay hôm nay" : `Còn ${withDays[0].days} ngày`}** — mình khuyên: ôn flashcard đến hạn trước, rồi làm vài câu trắc nghiệm từ ghi chú (mode **Trắc nghiệm**) để thử sức.`
-        : "Thời gian còn tương đối — chia nhỏ chương học vào Planner trước, gần ngày thi quay lại trắc nghiệm & flashcard.",
+        ? `**${withDays[0].days === 0 ? "Thi ngay hôm nay" : `Còn ${withDays[0].days} ngày`}** — mình khuyên: ôn flashcard đến hạn trước, rồi làm vài câu trắc nghiệm từ ghi chú (mode **Trắc nghiệm**) để thử sức.\n\nBạn muốn mình tóm tắt chương nào cho kỳ thi này?`
+        : "Thời gian còn tương đối — chia nhỏ chương học vào Planner trước, gần ngày thi quay lại trắc nghiệm & flashcard.\n\nBạn muốn mình gợi ý cách chia chương không?",
     ];
     return { text: lines.join("\n") + tail };
   }
