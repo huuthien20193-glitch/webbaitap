@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { Badge, Button, Card, EmptyState, LoadingBlock, Modal } from "@/components/ui";
+import { RichText } from "@/components/rich-text";
 import { useData } from "@/lib/data";
 import { useToast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -436,9 +437,17 @@ export default function AssistantPage() {
                   );
                 }
                 return (
-                  <div key={m.id} className="flex justify-start">
-                    <div className="max-w-[85%]">
-                      <div className="whitespace-pre-wrap rounded-2xl rounded-bl-sm border border-border bg-surface-2 px-4 py-2.5 text-sm">{m.content}</div>
+                  <div key={m.id} className="flex justify-start gap-2.5">
+                    <div
+                      className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-md shadow-indigo-600/25"
+                      aria-hidden
+                    >
+                      <Bot size={15} />
+                    </div>
+                    <div className="min-w-0 max-w-[85%]">
+                      <div className="rounded-2xl rounded-bl-sm border border-border bg-surface-2 px-4 py-2.5 text-sm shadow-sm">
+                        <RichText text={m.content} />
+                      </div>
                       {m2.flashcards && m2.flashcards.length > 0 && (
                         <div className="mt-2 space-y-2">
                           {m2.flashcards.slice(0, 10).map((c, i) => (

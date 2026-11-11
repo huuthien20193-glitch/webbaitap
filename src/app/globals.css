@@ -36,6 +36,30 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* Quầng màu mềm ở nền trang — sáng */
+body {
+  background-image:
+    radial-gradient(56rem 28rem at 12% -8%, rgb(99 102 241 / 0.07), transparent 60%),
+    radial-gradient(48rem 26rem at 92% 4%, rgb(168 85 247 / 0.06), transparent 55%),
+    radial-gradient(40rem 24rem at 50% 108%, rgb(56 189 248 / 0.05), transparent 60%);
+  background-attachment: fixed;
+}
+
+.dark body {
+  background-image:
+    radial-gradient(56rem 28rem at 12% -8%, rgb(99 102 241 / 0.12), transparent 60%),
+    radial-gradient(48rem 26rem at 92% 4%, rgb(168 85 247 / 0.09), transparent 55%),
+    radial-gradient(40rem 24rem at 50% 108%, rgb(56 189 248 / 0.07), transparent 60%);
+  background-attachment: fixed;
+}
+
+::selection {
+  background-color: rgb(99 102 241 / 0.25);
+}
+.dark ::selection {
+  background-color: rgb(129 140 248 / 0.35);
+}
+
 /* Thanh cuộn mảnh, đúng tông giao diện */
 * {
   scrollbar-width: thin;
