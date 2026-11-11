@@ -1,4 +1,5 @@
-/** Gọi tầng AI server-side (/api/ai). Key Gemini chỉ tồn tại ở server. */
+/** Gọi tầng AI server-side (/api/ai). Key env của chủ app nằm ở server; key cá nhân (nếu có) gửi kèm từng request. */
+import { getStoredApiKey } from "@/lib/ai-key";
 
 export type AIMode = "chat" | "summary" | "questions" | "flashcards" | "plan" | "report" | "suggestions";
 
@@ -18,28 +19,31 @@ export interface AIResult {
   json?: unknown;
   parseWarning?: string;
   error?: string;
+  /** Ghi chú server rơi về AI cơ sở (Gemini lỗi/key sai/chậm) */
+  fallbackNote?: string;
   /** Lệnh hành động AI đề xuất — client thực thi trong app */
   action?: AIAction;
 }
 
 export async function askAI(mode: AIMode, payload: AIPayload): Promise<AIResult> {
   try {
+    const apiKey = getStoredApiKey();
     const res = await fetch("/api/ai", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode, ...payload }),
+      body: JSON.stringify({ mode, ...payload, ...(apiKey ? { apiKey } : {}) }),
     });
     const j: unknown = await res.json().catch(() => null);
     if (!res.ok) {
       const msg = typeof j === "object" && j !== null && "error" in j ? String((j as { error: unknown }).error) : `Lỗi máy chủ (${res.status})`;
       return { error: msg };
     }
-    const box = j as { text?: string; json?: unknown; parseWarning?: string; action?: unknown };
+    const box = j as { text?: string; json?: unknown; parseWarning?: string; action?: unknown; fallbackNote?: string; error?: string };
     const action =
       typeof box.action === "object" && box.action !== null && typeof (box.action as { type?: unknown }).type === "string"
         ? (box.action as AIAction)
         : undefined;
-    return { text: box.text, json: box.json ?? null, parseWarning: box.parseWarning, action };
+    return { text: box.text, json: box.json ?? null, parseWarning: box.parseWarning, error: box.error, fallbackNote: box.fallbackNote, action };
   } catch {
     return { error: "Không kết nối được tới máy chủ AI." };
   }

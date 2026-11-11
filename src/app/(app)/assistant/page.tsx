@@ -21,6 +21,7 @@ import { useData } from "@/lib/data";
 import { useToast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { askAI, asObjectArray, num, str, type AIAction } from "@/lib/ai";
+import { clearStoredApiKey, getStoredApiKey, maskApiKey, setStoredApiKey } from "@/lib/ai-key";
 import { taskStats, minutesByCourse, courseProgress } from "@/lib/stats";
 import { shiftDateStr, todayStr } from "@/lib/date";
 import type { ChatMessage, Conversation } from "@/lib/types";
@@ -67,6 +68,15 @@ export default function AssistantPage() {
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const [cardsPreview, setCardsPreview] = useState<FlashcardDraft[] | null>(null);
+
+  /* AI Pro (BYOK): key cá nhân lưu localStorage, gửi kèm từng request */
+  const [keyModal, setKeyModal] = useState(false);
+  const [storedKey, setStoredKey] = useState("");
+  const [keyInput, setKeyInput] = useState("");
+  const [keySaving, setKeySaving] = useState(false);
+  useEffect(() => {
+    setStoredKey(getStoredApiKey());
+  }, []);
 
   /* Mở đường chạy nhanh từ Course Manager: /assistant?create=flashcards&course=... */
   useEffect(() => {
@@ -314,6 +324,12 @@ export default function AssistantPage() {
         assistantContent = "Không nhận được phản hồi từ AI. Thử lại giúp mình nhé.";
       }
 
+      // Gemini lỗi (vd key cá nhân sai) → báo toast để người dùng biết
+      if (res.fallbackNote) {
+        const keyBad = res.fallbackNote.includes("API key");
+        push(res.fallbackNote + (keyBad ? " — kiểm tra key ở nút “Nâng cấp AI”." : ""), keyBad ? "error" : "info");
+      }
+
       const assistantMsg: ChatMessage = { id: uid(), role: "assistant", content: assistantContent, createdAt: new Date().toISOString() };
       const finalMessages = [...nextMessages, assistantMsg];
       const saved: Conversation = {
@@ -334,6 +350,26 @@ export default function AssistantPage() {
 
   if (loading) {
     return <LoadingBlock label="Đang mở trợ lý AI..." />;
+  }
+
+  function saveKey(): void {
+    setKeySaving(true);
+    const r = setStoredApiKey(keyInput);
+    setKeySaving(false);
+    if (r.ok) {
+      setStoredKey(getStoredApiKey());
+      setKeyInput("");
+      setKeyModal(false);
+      push("AI Pro đã bật — giờ mình trả lời mọi câu hỏi như ChatGPT!", "success");
+    } else {
+      push(r.message, "error");
+    }
+  }
+
+  function removeKey(): void {
+    clearStoredApiKey();
+    setStoredKey("");
+    push("Đã gỡ key — quay về AI cơ sở.", "info");
   }
 
   async function analyze() {
@@ -424,6 +460,18 @@ export default function AssistantPage() {
                     <Button variant="secondary" className="text-xs" onClick={() => void analyze()}>
                       <BrainCircuit className="h-3.5 w-3.5 text-violet-500" /> Phân tích tiến độ của tôi
                     </Button>
+                    {storedKey ? (
+                      <button
+                        onClick={() => setKeyModal(true)}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-500/15 dark:text-emerald-400"
+                      >
+                        <Sparkles className="h-3.5 w-3.5" /> AI Pro đang bật
+                      </button>
+                    ) : (
+                      <Button className="text-xs bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600" onClick={() => setKeyModal(true)}>
+                        <Sparkles className="h-3.5 w-3.5" /> Nâng cấp AI — trò chuyện như ChatGPT
+                      </Button>
+                    )}
                   </div>
                 </div>
               )}
@@ -530,6 +578,14 @@ export default function AssistantPage() {
                 </Button>
               </form>
               <p className="mt-2 text-[11px] text-muted">AI có thể nhầm lẫn — hãy kiểm chứng thông tin quan trọng trước khi áp dụng.</p>
+              {!storedKey && (
+                <button
+                  onClick={() => setKeyModal(true)}
+                  className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-amber-600 transition-colors hover:text-amber-700 dark:text-amber-400"
+                >
+                  <Sparkles className="h-3 w-3" /> Mở khoá AI Pro (trò chuyện tự do như ChatGPT) →
+                </button>
+              )}
             </div>
           </>
         ) : (
@@ -602,6 +658,68 @@ export default function AssistantPage() {
               Lưu tất cả vào Ôn tập
             </Button>
           </div>
+        </div>
+      </Modal>
+
+      {/* Modal Nâng cấp AI (BYOK) */}
+      <Modal open={keyModal} onClose={() => setKeyModal(false)} title={storedKey ? "AI Pro (Gemini)" : "Nâng cấp AI — trò chuyện như ChatGPT"}>
+        <div className="space-y-4 text-sm">
+          {storedKey ? (
+            <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
+              🔓 Key đang bật: <code className="rounded bg-surface-2 px-1.5 py-0.5">{maskApiKey(storedKey)}</code>
+              <br />
+              <span className="text-muted">Mình đang trả lời mọi câu hỏi bằng Gemini — giải thích khái niệm, giải bài, tư vấn phương pháp.</span>
+            </p>
+          ) : (
+            <p className="text-muted">
+              AI cơ sở (miễn phí, luôn hoạt động) giỏi đọc dữ liệu app — nhưng muốn mình <b>trả lời mọi câu hỏi</b> (giải khái niệm, giải bài tập, tư vấn sâu) thì cần bộ não Gemini.
+              Dán key cá nhân của bạn — <b>lưu ngay trên máy bạn</b>, mỗi request gửi qua HTTPS tới server app.
+            </p>
+          )}
+
+          {!storedKey && (
+            <ol className="list-decimal space-y-1.5 pl-5">
+              <li>
+                Mở{" "}
+                <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="font-medium text-indigo-600 underline hover:text-indigo-700 dark:text-indigo-400">
+                  aistudio.google.com/apikey
+                </a>{" "}
+                → đăng nhập Google → <b>Create API key</b> (miễn phí, không cần thẻ).
+              </li>
+              <li>Copy key (dạng <code className="rounded bg-surface-2 px-1 py-0.5 text-[0.85em]">AIza…</code>).</li>
+              <li>Dán vào ô dưới → <b>Lưu key</b>. Xong!</li>
+            </ol>
+          )}
+
+          <div className="flex items-center gap-2">
+            <input
+              value={keyInput}
+              onChange={(e) => setKeyInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && keyInput.trim()) saveKey();
+              }}
+              type="password"
+              autoComplete="off"
+              placeholder={storedKey ? "Dán key mới để thay thế…" : "Dán Gemini key của bạn (AIza…)"}
+              className="input-base flex-1 font-mono text-xs"
+            />
+            <Button onClick={saveKey} disabled={keySaving || !keyInput.trim()} className="shrink-0">
+              {keySaving ? <Loader2 className="h-4 w-4 animate-spin" /> : storedKey ? "Đổi key" : "Lưu key"}
+            </Button>
+          </div>
+
+          {storedKey && (
+            <div className="flex items-center justify-between border-t border-border pt-3">
+              <span className="text-xs text-muted">Không muốn dùng nữa thì gỡ — app quay về AI cơ sở.</span>
+              <Button variant="danger" className="text-xs" onClick={removeKey}>
+                Gỡ key
+              </Button>
+            </div>
+          )}
+
+          <p className="border-t border-border pt-3 text-[11px] text-muted">
+            🔒 Key chỉ lưu trong trình duyệt của bạn (localStorage), không gửi đi đâu khác ngoài server app này. Không dán key của người khác nhé.
+          </p>
         </div>
       </Modal>
     </div>

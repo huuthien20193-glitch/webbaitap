@@ -668,12 +668,12 @@ export function localChat(input: LocalInput): LocalOutput {
         "1. Trang **Lập kế hoạch** → tab **AI** → *Tạo kế hoạch*: mình chia mọi việc theo deadline, độ khó, độ quan trọng vào từng ngày.\n" +
         "2. Tab **Tự động** bên cạnh — cùng thuật toán, nhanh hơn.\n\n" +
         first +
-        "Còn hội thoại tự nhiên kiểu ChatGPT thì cần Gemini — dán `GEMINI_API_KEY` vào Environment của service trên Render là xong (2 phút)." +
+        "Muốn hội thoại tự do kiểu ChatGPT (giải khái niệm, giải bài)? Mở nút **Nâng cấp AI** trong khung chat → dán Gemini key miễn phí là xong." +
         tail,
     };
   }
 
-  if (/thẻ|flashcard|ôn\s*tập|cách\s*nhớ|nhớ\s*lâu/.test(lastUser)) {
+  if (/thẻ|flashcard|ôn\s*tập/.test(lastUser)) {
     return {
       text:
         (Number.isFinite(dueCards) && dueCards > 0
@@ -748,26 +748,105 @@ export function localChat(input: LocalInput): LocalOutput {
   if (/bạn\s*là\s*ai|mày\s*là\s*ai|giới\s*thiệu\s*bản\s*thân/.test(lastUser)) {
     return {
       text:
-        "Mình là **AI cơ sở** của StudyOS — chạy trực tiếp trên server, không cần API key, và chỉ nói dựa trên dữ liệu thật trong app của bạn (không bịa).\n" +
-        "Mình giỏi nhất ở: tổng quan tiến độ, xếp lịch theo thuật toán, tóm tắt & tạo thẻ/câu hỏi từ bài bạn dán.\n" +
-        "Còn kiến thức tự do kiểu ChatGPT thì cần bộ não Gemini — bạn dán key vào Render Environment là mình 'nâng cấp' ngay." +
+        "Mình là **StudyOS AI** 🤖\n" +
+        "- Ở chế độ hiện tại (AI cơ sở), mình chạy trực tiếp trên server, đọc dữ liệu thật của bạn: nhiệm vụ, phiên học, flashcard, kỳ thi — không bịa.\n" +
+        "- Mình còn **làm trực tiếp** được: “tạo nhiệm vụ X hạn mai”, “việc X xong rồi”, “tạo môn học X”…\n" +
+        "- Muốn mình trò chuyện tự do kiểu ChatGPT (giải thích khái niệm bất kỳ, giải bài, tư vấn sâu)? Dán **Gemini key** miễn phí trong app — nút “Nâng cấp AI” ở khung chat, 2 phút là xong." +
         tail,
     };
+  }
+
+  /* ── Tri thức phương pháp học (trả lời được kể cả khi không có key) ── */
+  const skill = matchStudySkill(` ${lastUser} `);
+  if (skill) {
+    return { text: skill + tail };
   }
 
   return {
     text:
       pick(
         [
-          "Câu này ngoài phạm vi dữ liệu app của mình rồi 🙈 Mình đọc được: nhiệm vụ, phiên học, flashcard, kỳ thi, chương học. Thử hỏi “tình hình học của mình” xem!",
-          "Mình chưa xử lý được câu này — mình là AI offline, trả lời chắc nhất khi hỏi về tiến độ, kế hoạch, kỳ thi, flashcard.",
+          "Câu này mình chưa xử lý được ở chế độ AI cơ sở 🙈 Mình chắc nhất khi hỏi về tiến độ, kế hoạch, kỳ thi, flashcard — hoặc phương pháp học (thử “học sao cho nhớ lâu?”).",
+          "Ngoài phạm vi dữ liệu app rồi 🙈 Thử hỏi “tình hình học của mình”, “hôm nay nên làm gì”, hoặc mẹo học nhé!",
         ],
         seed
       ) +
       "\n\nMình **làm trực tiếp** được trong app: “tạo nhiệm vụ X hạn mai”, “việc X xong rồi”, “tạo môn học X”, “tạo kỳ thi X hạn 25/11”, “tạo thẻ hỏi: … đáp: …”.\n" +
-      "Còn muốn hỏi tự do như ChatGPT (giải thích khái niệm, kiến thức tổng quát)? Chỉ cần **GEMINI_API_KEY**: tạo miễn phí ở aistudio.google.com/apikey → Render → service webbaitap → Environment → dán key → Save. 2 phút, không cần sửa code." +
+      "Còn muốn hỏi tự do kiểu ChatGPT (giải thích khái niệm bất kỳ, giải bài)? Mở nút **Nâng cấp AI** ở khung chat → dán Gemini key miễn phí (lấy tại aistudio.google.com/apikey) → xong." +
       tail,
   };
+}
+
+/* ── 7.5 Tri thức phương pháp học có sẵn (không cần key) ── */
+
+function matchStudySkill(padded: string): string | null {
+  const has = (...words: string[]) => words.some((w) => padded.includes(w));
+
+  if (has(" nhớ lâu", " ghi nhớ", " nhớ dài", " học thuộc", " nhớ nhanh", " học sao")) {
+    return (
+      "Mẹo nhớ lâu — 4 kỹ thuật có bằng chứng khoa học nhất:\n" +
+      "- **Active recall**: đóng sách, tự kiểm tra mình nhớ gì rồi mới xem lại. Tự hỏi–đáp hiệu quả gấp 3 lần đọc đi đọc lại.\n" +
+      "- **Spaced repetition**: ôn lại sau 1 ngày → 3 ngày → 1 tuần → 2 tuần. App có sẵn chế độ **Flashcard** với thuật toán SM-2 tự xếp lịch giúp bạn.\n" +
+      "- **Kỹ thuật Feynman**: giải thích khái niệm bằng lời của mình như dạy trẻ 10 tuổi — chỗ líu lại chính là chỗ chưa hiểu.\n" +
+      "- **Chunking**: chia bài thành khối nhỏ có tên gọi (ví dụ 5 bước của vòng lặp, 3 tính chất của phép cộng).\n" +
+      "Dán bài học vào **Tóm tắt** để mình rút từ khoá & câu hỏi tự kiểm tra nhé!"
+    );
+  }
+
+  if (has(" quản lý thời gian", " thời gian biểu", " phân bổ thời gian", " pomodoro")) {
+    return (
+      "Quản lý thời gian học — công thức đơn giản mà hiệu quả:\n" +
+      "- **Pomodoro 25/5**: học 25 phút, nghỉ 5 phút; sau 4 vòng nghỉ dài 15–30 phút. Giữ điện thoại ngoài tầm tay trong 25 phút đó.\n" +
+      "- **Nguyên tắc quả ếch**: làm việc khó/ngại nhất ngay đầu giờ — khi não còn tươi.\n" +
+      "- **Lập khối lịch**: chặn trước khung giờ học vào lịch (2 buổi/ngày × 45 phút) thay vì học \"khi rảnh\" — lúc nào cũng không rảnh.\n" +
+      "- **Tối thứ 7** dành 15 phút xem lại tuần: việc nào trôi, việc nào trễ — chỉnh lại tuần sau.\n" +
+      "Bạn muốn mình xếp lịch sẵn theo deadline hiện tại? Trang **Lập kế hoạch** → tab **AI** nhé!"
+    );
+  }
+
+  if (has(" trì hoãn", " lười", " không tập trung", " khó tập trung", " mất tập trung", " chán học", " ôm đồm")) {
+    return (
+      "Trì hoãn là chuyện não chống lại việc *bắt đầu*, không phải chống lại việc học. Xử lý được:\n" +
+      "- **Quy tắc 2 phút**: chỉ cam kết làm 2 phút. Bắt đầu rồi thì não thường tiếp tục (điểm khó nhất là khởi động).\n" +
+      "- **Bẻ nhỏ**: việc to (\"viết báo cáo\") → mục tiêu nhỏ hôm nay (\"chỉ viết phần mở đầu\"). App đã chia việc theo phút — cứ mở mục nhỏ nhất.\n" +
+      "- **Bỏ thiết bị**: điện thoại để phòng khác (không chỉ úp mặt xuống — để *rời mắt* mới đủ).\n" +
+      "- **Khoanh thất bại**: học 25 phút mà không tập trung được thì cho phép dừng — quay lại sau 15 phút, đừng bỏ cả buổi vì 1 phút chán.\n" +
+      "Muốn mình gợi ý nên bắt đầu từ việc nào trước? Hỏi “hôm nay nên làm gì” nhé!"
+    );
+  }
+
+  if (has(" ôn thi", " trước khi thi", " cho kỳ thi", " kiểm tra ngày mai", " thi ngày mai", " ôn tập hiệu quả", " ôn bài")) {
+    return (
+      "Kế hoạch ôn thi gọn lẹ (3 lớp):\n" +
+      "- **Trước thi 5+ ngày**: đọc giáo trình/slide một lượt, đánh dấu mục chưa hiểu → hỏi thầy/bạn ngay, đừng để dồn.\n" +
+      "- **2–4 ngày**: làm **đề cũ & câu hỏi chương** — đây là lớp quan trọng nhất. Sai chỗ nào, quay về đúng mục đó đọc lại (đừng đọc cả chương).\n" +
+      "- **1 ngày & ngày thi**: chỉ ôn **flashcard + công thức + lỗi sai đã ghi lại**. Đừng học cái mới — chỉ củng cố cái cũ.\n" +
+      "- Đêm trước: ngủ ≥ 7 tiếng. Não thiếu ngủ mất 30% khả năng recall — thức khuya học thêm là lỗ.\n" +
+      "App có sẵn **Trắc nghiệm** (mode tạo câu hỏi) — dán chương vào là có đề ôn ngay!"
+    );
+  }
+
+  if (has(" ghi chú", " note", " cornell", " sơ đồ tư duy", " mindmap", " vẽ sơ đồ")) {
+    return (
+      "Ghi chú hiệu quả — chọn kiểu phù hợp môn:\n" +
+      "- **Cornell**: chia trang 2 cột — cột phải chép ý khi nghe, cột trái viết *từ khoá + câu hỏi*. Cuối trang viết 2–3 dòng tóm tắt bằng lời của mình. Ôn lại = che cột phải, tự hỏi theo cột trái.\n" +
+      "- **Mindmap** (môn có cấu trúc phân nhánh như sinh học, lịch sử): chủ đề giữa → nhánh chính → lá. Tự vẽ tay tốt hơn dùng app vì phải *chọn* ý chính.\n" +
+      "- **Outline** (môn logic như toán, lập trình): ghi theo mục 1, 1.1, 1.2 — kèm ví dụ làm mẫu cho mỗi định lý/cú pháp.\n" +
+      "Quy tắc vàng: **ghi ít hơn nghe nhiều** — ghi từ khoá, không chép nguyên câu. Bài ghi xong, dán vào **Tóm tắt** để mình rút từ khoá nhé!"
+    );
+  }
+
+  if (has(" mất gốc", " bắt đầu từ đâu", " học lại từ đầu", " tự học", " yếu môn")) {
+    return (
+      "Mất gốc mà muốn gở lại — lộ trình 3 bước:\n" +
+      "- **1. Chẩn đoán**: làm 1 đề cũ không tra cứu. Sai dạng nào nhiều nhất → đó là gốc rễ cần vá trước, đừng học dàn trải.\n" +
+      "- **2. Vá gốc bằng video + 5 bài dễ**: xem 1 video giải thích khái niệm (Việt Nam: studywithme, kênh giáo viên trên YouTube) rồi làm ngay 5 bài **cực dễ** của dạng đó. Dễ tạo đà, khó tạo bỏ.\n" +
+      "- **3. Lặp lên dốc**: mỗi ngày 1 khái niệm + 10 bài tăng dần độ khó. Ghi vào **Chương học** mức hiểu 1–5 để theo dõi — chương nào còn ≤2 là phải quay lại.\n" +
+      "Quan trọng: mất gốc không phải lỗi của bạn — là thiếu lộ trình. Giờ đã có lộ trình rồi đó 💪"
+    );
+  }
+
+  return null;
 }
 
 /* ── Dispatcher ──────────────────────────────────────────── */

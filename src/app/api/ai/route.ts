@@ -15,6 +15,13 @@ export const dynamic = "force-dynamic";
 
 const API_KEY = process.env.GEMINI_API_KEY;
 const MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+
+/** Key cá nhân người dùng dán trong app (BYOK) — ưu tiên hơn key env nếu có */
+function resolveKey(bodyApiKey: unknown): string {
+  const k = typeof bodyApiKey === "string" ? bodyApiKey.trim() : "";
+  if (k.length >= 30 && k.length <= 80 && /^[A-Za-z0-9_-]+$/.test(k)) return k;
+  return API_KEY ?? "";
+}
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
 const MAX_TEXT = 6000; // ký tự mỗi tin nhắn
@@ -50,8 +57,16 @@ const BASE =
   "Luôn trả lời bằng tiếng Việt, ngắn gọn, chính xác, có cấu trúc rõ ràng (gạch đầu dòng khi phù hợp). " +
   "Không sử dụng dữ liệu giả; nếu thiếu thông tin hãy hỏi lại hoặc nói rõ rằng cần thêm dữ liệu.";
 
+const CHAT_PROMPT =
+  "Bạn là StudyOS AI — trợ lý học tập thân thiện trong app StudyFlow của học sinh, sinh viên Việt Nam.\n" +
+  "Phong cách: tự nhiên, ấm áp, xưng \"mình\" — gọi người dùng là \"bạn\", dùng emoji vừa phải, không sáo rỗng, không dài dòng vô ích.\n" +
+  "Khả năng: trả lời MỌI câu hỏi như một trợ lý AI thông minh — giải thích khái niệm (toán, lập trình, khoa học…), cách học hiệu quả, giải bài, tư vấn phương pháp — không giới hạn ở dữ liệu app.\n" +
+  "Khi DỮ LIỆU HỌC TẬP được cung cấp và câu hỏi liên quan, hãy dùng số liệu thật (nhiệm vụ, kỳ thi, tiến độ…) để trả lời cá nhân hoá; không bịa thêm số liệu không có.\n" +
+  "Khi người dùng muốn TẠO nhiệm vụ / môn học / kỳ thi / thẻ ghi nhớ hay đánh dấu hoàn thành: nếu họ chưa gõ đúng mẫu lệnh, hướng dẫn ngắn gọn mẫu lệnh để dùng trong khung chat, ví dụ: \"tạo nhiệm vụ Làm lab 3 hạn mai 45 phút\" hoặc \"việc Đọc chương 2 xong rồi\".\n" +
+  "Trả lời bằng tiếng Việt, có cấu trúc (gạch đầu dòng, **đậm** từ khoá chính), câu trả lời vừa đủ chi tiết — không lan man.";
+
 const MODE_PROMPT: Record<Mode, string> = {
-  chat: BASE,
+  chat: CHAT_PROMPT,
   summary: `${BASE}\nNhiệm vụ: TÓM TẮT tài liệu học tập người dùng cung cấp. Trả về: (1) ý chính gạch đầu dòng, (2) từ khóa cần nhớ, (3) câu hỏi tự kiểm tra. Tuân thủ nghiêm nội dung được cho, không bịa thêm.`,
   questions: `${BASE}\nNhiệm vụ: TẠO CÂU HỎI TRẮC NGHIỆM từ nội dung. Trả về CHỈ JSON mảng: [{"question": string, "options": [string, string, string, string], "answerIndex": 0|1|2|3, "explain": string}]. Tạo 5 câu, mỗi câu 4 lựa chọn.`,
   flashcards: `${BASE}\nNhiệm vụ: TẠO FLASHCARD từ nội dung. Trả về CHỈ JSON mảng: [{"question": string, "answer": string}] với 6–10 thẻ, một mặt là câu hỏi ngắn gọn, một mặt là đáp án súc tích.`,
@@ -89,11 +104,11 @@ interface Turn {
   text: string;
 }
 
-async function callGemini(system: string, turns: Turn[], json: boolean): Promise<string> {
+async function callGemini(system: string, turns: Turn[], json: boolean, apiKey: string): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 50_000);
   try {
-    const res = await fetch(`${ENDPOINT}?key=${encodeURIComponent(API_KEY as string)}`, {
+    const res = await fetch(`${ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal: controller.signal,
@@ -152,6 +167,8 @@ interface AIBody {
   context?: unknown;
   messages?: IncomingMessage[];
   data?: unknown;
+  /** Key cá nhân người dùng (BYOK) — tuỳ chọn */
+  apiKey?: unknown;
 }
 
 export async function POST(req: NextRequest) {
@@ -168,9 +185,10 @@ export async function POST(req: NextRequest) {
   const mode = body.mode;
   const jsonMode = mode === "questions" || mode === "flashcards" || mode === "plan" || mode === "suggestions";
   const messages = clipMessages(Array.isArray(body.messages) ? body.messages : []);
+  const apiKey = resolveKey(body.apiKey);
 
-  /* ── Chưa cấu hình GEMINI_API_KEY → AI cơ sở (offline, không cần key) ── */
-  if (!API_KEY) {
+  /* ── Chưa có key nào (env + cá nhân) → AI cơ sở (offline, không cần key) ── */
+  if (!apiKey) {
     const local = runLocalAI({
       mode: mode as LocalMode,
       prompt: trunc(body.prompt, 2000),
@@ -216,7 +234,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const text = await callGemini(MODE_PROMPT[mode], turns, jsonMode);
+    const text = await callGemini(MODE_PROMPT[mode], turns, jsonMode, apiKey);
 
     if (jsonMode) {
       const parsed = extractJson(text);
