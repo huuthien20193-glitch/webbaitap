@@ -164,6 +164,9 @@ export default function AssistantPage() {
       const res = await askAI(mode, {
         messages: nextMessages.map((m) => ({ role: m.role, content: m.content })),
         prompt: mode === "chat" ? undefined : text,
+        // Kèm dữ liệu học tập cho mọi cuộc trò chuyện — engine offline cần
+        // số liệu thật để phân tích; Gemini cũng dùng làm bối cảnh.
+        context: mode === "chat" ? studyContext : undefined,
       });
 
       let assistantContent = res.text ?? "";

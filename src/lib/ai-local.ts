@@ -365,53 +365,79 @@ export function localChat(input: LocalInput): LocalOutput {
   const msgs = Array.isArray(input.messages) ? input.messages.filter((m) => clampText(m.content, 1)) : [];
   const lastUser = clampText([...msgs].reverse().find((m) => (m.role ?? "user") === "user")?.content, 300).toLowerCase();
   const ctx = asObj(input.context);
+  const hasCtx = Object.keys(ctx).length > 1;
   const today = /^[12]\d{3}-[01]\d-[0-3]\d$/.test(clampText(ctx.today, 10)) ? clampText(ctx.today, 10) : todayStr();
 
-  // Tìm kiếm trong dữ liệu học tập thật của người dùng
   const taskStats = asObj(ctx.taskStats);
   const openTasks = Number(taskStats.open);
   const overdue = Number(taskStats.overdue);
   const dueCards = Number(ctx.flashcardsDue);
-  const courseNames = Array.isArray(ctx.courses) ? (ctx.courses as unknown[]).map((c) => clampText(c, 40)) : [];
-  const mentionsCourse = courseNames.find((c) => c && lastUser.includes(c.toLowerCase()));
+  const weeklyMinutes = Number(ctx.weeklyMinutes);
+  const courseNames = Array.isArray(ctx.courses) ? (ctx.courses as unknown[]).map((c) => clampText(c, 40)).filter(Boolean) : [];
+  const progressByCourse = Array.isArray(ctx.progressByCourse) ? (ctx.progressByCourse as Record<string, unknown>[]) : [];
+  const weakest = Array.isArray(ctx.weakestChapters) ? (ctx.weakestChapters as Record<string, unknown>[]) : [];
+  const exams = Array.isArray(ctx.exams) ? (ctx.exams as Record<string, unknown>[]) : [];
+  const mentionsCourse = courseNames.find((c) => lastUser.includes(c.toLowerCase()));
 
-  if (/tiến\s*độ|phân\s*tích|báo\s*cáo|tổng\s*quan|tình\s*hình/.test(lastUser) && Object.keys(ctx).length > 1) {
+  const tail = hasCtx
+    ? ""
+    : "\n\n(Trang đang không gửi được dữ liệu học tập — hãy dùng mục này sau khi đăng nhập, AI sẽ đọc số liệu thật của bạn.)";
+
+  if (/tiến\s*độ|phân\s*tích|báo\s*cáo|tổng\s*quan|tình\s*hình|học\s*ra\s*sao/.test(lastUser) && hasCtx) {
     const lines = [
       `**Tổng quan học tập (dữ liệu đến ${today}):**`,
-      `- Nhiệm vụ đang mở: ${Number.isFinite(openTasks) ? openTasks : "—"}${overdue ? `, trong đó ${overdue} quá hạn` : ""}`,
-      Number.isFinite(Number(ctx.weeklyMinutes)) ? `- Thời gian học 7 ngày qua: ${fmtMin(ctx.weeklyMinutes)}` : "",
+      Number.isFinite(openTasks) ? `- Nhiệm vụ đang mở: ${openTasks}${overdue ? ` (⚠️ ${overdue} quá hạn)` : ""}` : "",
+      Number.isFinite(weeklyMinutes) ? `- Thời gian học 7 ngày qua: ${fmtMin(weeklyMinutes)}` : "",
       Number.isFinite(dueCards) ? `- Flashcard đến hạn: ${dueCards}` : "",
-      courseNames.length > 0 ? `- Môn: ${courseNames.join(", ")}` : "",
+      progressByCourse.length > 0
+        ? `- Tiến độ môn: ${progressByCourse.slice(0, 4).map((p) => `${clampText(p.course, 30)} (${clampText(p.tasks, 12)})`).join(", ")}`
+        : courseNames.length > 0
+          ? `- Môn: ${courseNames.join(", ")}`
+          : "",
+      weakest.length > 0 ? `- Chương yếu nhất: ${clampText(asObj(weakest[0]).chapter, 40)} (${clampText(asObj(weakest[0]).course, 30)})` : "",
+      exams.length > 0 ? `- Kỳ thi sắp tới: ${clampText(asObj(exams[0]).title, 40)} — ${clampText(asObj(exams[0]).date, 12)}` : "",
       "",
-      "**Gợi ý việc đầu tiên:** mở Planner → hàng đợi ưu tiên và làm dòng đầu tiên — đó là nhiệm vụ điểm số cao nhất theo thuật toán xếp hạng.",
+      "**Việc nên làm đầu tiên:** mở Planner → hàng đợi ưu tiên → làm dòng đầu tiên (điểm số cao nhất theo thuật toán xếp hạng).",
     ].filter(Boolean);
-    return { text: lines.join("\n") };
+    return { text: lines.join("\n") + tail };
   }
 
-  if (/kế\s*hoạch|học\s*gì|nên\s*làm|ưu\s*tiên|phân\s*công/.test(lastUser)) {
+  if (/kế\s*hoạch|học\s*gì|nên\s*làm|ưu\s*tiên|phân\s*công|lịch\s*học/.test(lastUser)) {
     return {
       text:
-        "Ở chế độ AI cơ sở mình xếp lịch bằng thuật toán (không cần key):\n" +
-        "1. Mở trang **Lập kế hoạch** → bấm **AI** → *Tạo kế hoạch* — mình sẽ chia mọi nhiệm vụ theo deadline, độ khó, độ quan trọng vào từng ngày.\n" +
-        "2. Hoặc tab **Tự động** ngay bên cạnh — cùng thuật toán, nhanh gọn.\n\n" +
-        "Muốn hội thoại tự nhiên hơn? Thêm `GEMINI_API_KEY` vào biến môi trường server (xem README) — khi ấy bộ não Gemini sẽ thay mình trả lời.",
+        "Mình xếp lịch bằng thuật toán (không cần API key):\n" +
+        "1. Trang **Lập kế hoạch** → tab **AI** → *Tạo kế hoạch* — chia mọi nhiệm vụ theo deadline, độ khó, độ quan trọng vào từng ngày.\n" +
+        "2. Hoặc tab **Tự động** — cùng thuật toán, nhanh gọn.\n\n" +
+        "Muốn hội thoại tự nhiên như ChatGPT? Thêm `GEMINI_API_KEY` vào biến môi trường server (README có 2 bước) — khi đó mọi câu hỏi đều do Gemini trả lời." +
+        tail,
     };
   }
 
-  if (/thẻ|flashcard|ôn\s*tập|nhớ/.test(lastUser)) {
+  if (/thẻ|flashcard|ôn\s*tập|cách\s*nhớ|nhớ\s*lâu/.test(lastUser)) {
     return {
       text:
-        (Number.isFinite(dueCards) && dueCards > 0
-          ? `Bạn có **${dueCards} flashcard đến hạn** hôm nay. `
-          : "") +
+        (Number.isFinite(dueCards) && dueCards > 0 ? `Bạn có **${dueCards} flashcard đến hạn** hôm nay. ` : "") +
         "Tạo thẻ: Trợ lý AI → mode **Flashcard** (dán nội dung bài học, mình cắt thành thẻ) hoặc tự tạo ở trang **Ôn tập**.\n" +
-        "SM-2 sẽ tự xếp ngày ôn kế tiếp sau mỗi lượt đánh giá.",
+        "SM-2 sẽ tự xếp ngày ôn kế tiếp sau mỗi lượt đánh giá — thẻ nào bạn hay quên sẽ được ôn sớm hơn." +
+        tail,
     };
+  }
+
+  if (/thi\b|kỳ\s*thi|đề\s|kiểm\s*tra|điểm/.test(lastUser) && exams.length > 0) {
+    const lines = [
+      "**Kỳ thi của bạn:**",
+      ...exams.slice(0, 5).map((e, i) => `${i + 1}. ${clampText(e.title, 50)}${e.course ? ` (${clampText(e.course, 30)})` : ""} — ${clampText(e.date, 12)}`),
+      "",
+      "Học hiệu quả cho kỳ thi: tạo trắc nghiệm từ ghi chú (mode **Trắc nghiệm**) và ôn flashcard đến hạn trước.",
+    ];
+    return { text: lines.join("\n") + tail };
   }
 
   if (mentionsCourse) {
     return {
-      text: `Về môn **${mentionsCourse}**: mình có thể tóm tắt nội dung (mode **Tóm tắt**), tạo flashcard/trắc nghiệm từ ghi chú của bạn, và xem tiến độ nhiệm vụ của môn này ở trang **Môn học**. Dán ghi chú vào đây (mode ${input.mode}) là mình xử lý ngay.`,
+      text:
+        `Về môn **${mentionsCourse}**: mình có thể tóm tắt ghi chú (mode **Tóm tắt**), tạo flashcard/trắc nghiệm từ nội dung bạn dán, và xem tiến độ ở trang **Môn học**. Dán ghi chú vào đây là mình xử lý ngay.` +
+        tail,
     };
   }
 
@@ -419,16 +445,20 @@ export function localChat(input: LocalInput): LocalOutput {
     return {
       text:
         "Chào bạn 👋 Mình là **AI cơ sở** của StudyOS — bản offline không cần API key.\n" +
-        "Mình làm được ngay: tóm tắt ghi chú, tạo flashcard & trắc nghiệm từ nội dung bạn dán, phân tích tiến độ học, xếp lịch 7 ngày theo thuật toán.\n" +
-        "Hỏi thẳng: “tóm tắt: ” + nội dung, hoặc dán bài vào mode Tóm tắt nhé!",
+        "Mình làm được ngay: phân tích tiến độ học, tóm tắt ghi chú, tạo flashcard & trắc nghiệm từ nội dung bạn dán, xếp lịch 7 ngày theo thuật toán.\n" +
+        "Thử hỏi: “phân tích tiến độ của tôi” — hoặc bấm mode Tóm tắt rồi dán bài học vào!" +
+        tail,
     };
   }
 
   return {
     text:
-      "Bạn hỏi mình ở chế độ **AI cơ sở** (offline) — mình trả lời được chính xác khi: tổng hợp số liệu học tập của bạn, tóm tắt/trắc nghiệm/flashcard từ đoạn văn bạn dán, và xếp lịch theo thuật toán.\n" +
-      "Làm ngay: bấm mode Tóm tắt rồi dán nội dung bài học.\n" +
-      "Cần trả lời hội thoại tự nhiên theo ý bạn? Bạn chỉ cần thêm `GEMINI_API_KEY` vào biến môi trường server — README có 2 bước, sau đó toàn bộ mode đều dùng Gemini.",
+      "Ở chế độ **AI cơ sở** (offline) mình trả lời chính xác các câu về **dữ liệu học tập của bạn**:\n" +
+      "- “phân tích tiến độ của tôi” — tổng quan nhiệm vụ, thời gian học, flashcard\n" +
+      "- “kế hoạch học bây giờ” — hướng dẫn xếp lịch theo thuật toán\n" +
+      "- “kỳ thi của tôi” — danh sách thi sắp tới\n\n" +
+      "Hỏi kiến thức tổng quát (không có trong dữ liệu) cần bộ não **Gemini**: thêm `GEMINI_API_KEY` vào biến môi trường server — lấy miễn phí tại aistudio.google.com/apikey (README có 2 bước)." +
+      tail,
   };
 }
 
