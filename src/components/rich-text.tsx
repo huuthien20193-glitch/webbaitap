@@ -41,7 +41,9 @@ export function RichText({ text, className }: { text: string; className?: string
 
 function inline(s: string): ReactNode[] {
   const parts: ReactNode[] = [];
-  const re = /\*\*(.+?)\*\*|\*([^*\n]+)\*|`([^`]+)`/g;
+  // Đậm **x**; nghiêng *x* (bắt buộc có chữ cái bên trong — dấu * của phép tính
+  // như "345*12+88" không bị nuốt, và không cướp dấu * của **đậm**); code `x`.
+  const re = /\*\*(.+?)\*\*|\*(?=[^*\n]*\p{L})(\S(?:[^*\n]*\S)?)\*|`([^`]+)`/gu;
   let last = 0;
   let k = 0;
   let m: RegExpExecArray | null;
