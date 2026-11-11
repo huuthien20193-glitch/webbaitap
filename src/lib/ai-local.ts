@@ -78,7 +78,17 @@ function cap(s: string): string {
 }
 
 function asObj(v: unknown): Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  if (typeof v === "object" && v !== null && !Array.isArray(v)) return v as Record<string, unknown>;
+  // Chấp nhận cả chuỗi JSON (đồ bền: một số caller stringify context)
+  if (typeof v === "string" && v.trim().startsWith("{")) {
+    try {
+      const j: unknown = JSON.parse(v);
+      return typeof j === "object" && j !== null && !Array.isArray(j) ? (j as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
 }
 
 /* ── 1. Tóm tắt trích xuất (extractive) ──────────────────── */
@@ -473,11 +483,14 @@ export function parseChatAction(raw: string, ctx: Record<string, unknown>): { ac
   /* ── Hoàn thành nhiệm vụ ── */
   const paddedT = ` ${t} `;
   if (/ (?:xong|hoàn thành|hoàn tất|đánh dấu) /.test(paddedT) && !questiony) {
+    const hasTaskWord = / (?:việc|nhiệm\s*vụ|task) /.test(paddedT);
     let title = "";
     const before = text.match(/(?:việc|nhiệm\s*vụ|task)\s+(.{2,80}?)\s+(?:xong|hoàn\s*thành|hoàn\s*tất|được\s*rồi|xong\s*rồi)/i);
     const after = text.match(/(?:đánh\s*dấu|hoàn\s*thành|hoàn\s*tất|làm\s*xong|xong\s*rồi|xong)\s*(?:việc|nhiệm\s*vụ|task)?\s*["'“”«]?([^"'“”»]+)?["'“”»]?/i);
+    const pre = text.match(/(.{2,60}?)\s+(?:xong|hoàn\s*thành|hoàn\s*tất)(?:\s*rồi|\s*rùi|\s*được\s*rồi)?\s*[.!]*$/i);
     if (before) title = cleanTitle(before[1]);
     else if (after?.[1]) title = cleanTitle(after[1]);
+    else if (pre) title = cleanTitle(pre[1]);
     const want = title.toLowerCase();
     if (want) {
       const matched =
@@ -490,9 +503,14 @@ export function parseChatAction(raw: string, ctx: Record<string, unknown>): { ac
           reply: pick([`Ok, để mình đánh dấu **${matched}** là hoàn thành…`, `Giỏi ghê! Chờ mình cập nhật **${matched}** nhé…`], seed),
         };
       }
-      return { reply: `Mình không thấy việc nào đang mở khớp “${title}”. Bạn nói lại tên chính xác giúp nhé (xem danh sách ở trang Nhiệm vụ).` };
+      // Có từ "việc/task" nhưng không khớp tên → báo lỗi rõ; không có từ đó thì là câu kể
+      // thường (vd "học xong quên ngay") → bỏ qua, để nhánh tri thức xử lý.
+      if (hasTaskWord) {
+        return { reply: `Mình không thấy việc nào đang mở khớp “${title}”. Bạn nói lại tên chính xác giúp nhé (xem danh sách ở trang Nhiệm vụ).` };
+      }
+    } else if (hasTaskWord) {
+      return { reply: "Bạn muốn đánh dấu việc nào xong? Nói kiểu “việc Đọc chương 2 xong rồi” nhé." };
     }
-    return { reply: "Bạn muốn đánh dấu việc nào xong? Nói kiểu “việc Đọc chương 2 xong rồi” nhé." };
   }
 
   /* ── Tạo kỳ thi ── */
@@ -591,11 +609,57 @@ export function localChat(input: LocalInput): LocalOutput {
     return { text: cmd.reply + (cmd.action ? "" : tail), ...(cmd.action ? { action: cmd.action } : {}) };
   }
 
+  /* Kỹ năng "AI thật": ngày giờ, tính toán, ngẫu nhiên, nối tiếp */
+  const paddedLast = ` ${lastUser} `;
+  if (/hôm nay ngày mấy|thứ mấy|thứ mấy rồi|mấy giờ rồi|giờ hiện tại|ngày mai là thứ|thời gian hiện tại|bây giờ là mấy giờ|bây giờ ngày mấy/.test(lastUser)) {
+    const vn = vnNowText();
+    return { text: `Bây giờ là **${vn}** 🕒` + tail };
+  }
+
+  const rand = tryRandomOrChoose(paddedLast);
+  if (rand) {
+    return { text: rand };
+  }
+
+  const calc = tryArithmetic(lastUserRaw);
+  if (calc) {
+    return { text: `${calc}\n\n(Của mình là máy tính 4 phép tính — cần giải chi tiết bước từng bước thì dán bộ não Gemini vào nút **Nâng cấp AI** nhé 😄)` + tail };
+  }
+
+  if (/còn gì nữa|kể tiếp|nói tiếp|thêm đi|thêm nào|còn đâu|và rồi sao|chi tiết hơn|nói thêm/.test(lastUser)) {
+    const more: string[] = ["Ok, mình kể thêm chi tiết nhé:"];
+    const byCourse = Array.isArray(ctx.minutesByCourse) ? (ctx.minutesByCourse as Record<string, unknown>[]).slice(0, 5) : [];
+    if (byCourse.length > 0) {
+      more.push(
+        "- Thời gian học theo môn: " +
+          byCourse.map((r) => `**${clampText(r.course, 30)}** ${clampText(r.minutes ?? r.total ?? "", 10)} phút`).join(", ")
+      );
+    }
+    if (weakest.length > 1) {
+      more.push(
+        "- Các chương cần vá tiếp: " +
+          weakest.slice(0, 4).map((w) => `**${clampText(asObj(w).chapter, 40)}** (môn ${clampText(asObj(w).course, 30)})`).join(", ")
+      );
+    }
+    if (exams.length > 0) {
+      const soon = exams
+        .map((e) => ({ t: clampText(e.title, 40), d: daysUntil(clampText(e.date, 12), today) }))
+        .filter((e) => Number.isFinite(e.d) && e.d >= 0)
+        .sort((a, b) => a.d - b.d)[0];
+      if (soon) more.push(`- Kỳ thi gần nhất vẫn là **${soon.t}**${soon.d === 0 ? " — hôm nay!" : `, còn ${soon.d} ngày`}`);
+    }
+    if (Number.isFinite(dueCards) && dueCards > 0) more.push(`- Đừng quên ${dueCards} flashcard đến hạn ở trang Ôn tập`);
+    if (more.length === 1) {
+      more.push("Hiện dữ liệu app của mình chỉ có vậy — muốn sâu hơn nữa thì cần bộ não Gemini ở nút **Nâng cấp AI** 😉");
+    }
+    return { text: more.join("\n") + tail };
+  }
+
   /* Nhận xét tổng thể theo dữ liệu — dùng cho câu mở/kết */
   const mood =
     overdue > 0 ? "có một chút áp lực" : weeklyMinutes >= 300 ? "rất đáng nể" : weeklyMinutes > 0 ? "ổn" : "đang nghỉ hơi lâu";
 
-  if (/tiến\s*độ|phân\s*tích|báo\s*cáo|tổng\s*quan|tình\s*hình|học\s*ra\s*sao|sao\s*rồi|như\s*thế\s*nào/.test(lastUser) && hasCtx) {
+  if (/(tiến\s*độ|tình\s*hình|báo\s*cáo|tổng\s*quan|học\s*ra\s*sao|sao\s*rồi|như\s*thế\s*nào|phân\s*tích\s*(?:học|tiến|dữ|kết|số|công))/.test(lastUser) && hasCtx) {
     const lines: string[] = [];
     lines.push(
       pick(
@@ -745,7 +809,7 @@ export function localChat(input: LocalInput): LocalOutput {
     return { text: pick(["Không có gì! Cần gì cứ hô mình nhé 😄", "Rất vui giúp được bạn — học tốt nhé 💪"], seed) + tail };
   }
 
-  if (/bạn\s*là\s*ai|mày\s*là\s*ai|giới\s*thiệu\s*bản\s*thân/.test(lastUser)) {
+  if (/bạn\s*là\s*ai|mày\s*là\s*ai|giới\s*thiệu\s*bản\s*thân|bạn\s*làm\s*được\s*gì|giúp\s*được\s*gì|chức\s*năng\s*gì|biết\s*làm\s*gì|khả\s*năng/.test(lastUser)) {
     return {
       text:
         "Mình là **StudyOS AI** 🤖\n" +
@@ -777,9 +841,100 @@ export function localChat(input: LocalInput): LocalOutput {
   };
 }
 
+/* ── 7.6 Kỹ năng "AI thật": khái niệm, tính toán, thời gian, ngẫu nhiên ── */
+
+/** Từ điển khái niệm — trả lời "X là gì" mà không cần key */
+const CONCEPTS: [RegExp, string][] = [
+  [/sm-?\s*2/, "SM-2 là thuật toán **lặp lại ngắt quãng** (SuperMemo-2) đằng sau Anki và phần Ôn tập của app:\n- Mỗi thẻ có độ \"dễ\" (ease factor). Trả lời tốt → khoảng cách tới lần ôn sau tăng dần: 1 ngày → 6 ngày → 13 ngày…\n- Trả lời mơ hồ/kém → khoảng cách co lại, thẻ khó quay lại sớm hơn.\n- Kết quả: ôn đúng lúc sắp quên — nhớ lâu mà tốn ít thời gian nhất."],
+  [/spaced\s*repetition|lặp\s*lại\s*ngắt\s*quãng/, "**Spaced repetition (lặp lại ngắt quãng)** là nguyên lý: ôn lại một nội dung vào đúng lúc não sắp quên nó → dấu ấn nhớ được củng cố mạnh hơn mỗi lần. Lịch 1 ngày → 3 ngày → 1 tuần → 2 tuần → 1 tháng là kinh điển. Đây là kỹ thuật ghi nhớ có bằng chứng mạnh nhất trong giáo dục học — app đã tự động hoá nó bằng SM-2 ở phần Ôn tập."],
+  [/active\s*recall|gợi\s*nhớ\s*chủ\s*động/, "**Active recall (gợi nhớ chủ động)**: thay vì đọc lại tài liệu, bạn *đóng tài liệu* và tự cố gắng nhớ ra nội dung — bằng câu hỏi, flashcard, hoặc vẽ lại sơ đồ từ trí nhớ. Não phải \"kéo\" tri thức ra thì trí nhớ mới bền; đọc lại nhiều lần chỉ tạo cảm giác quen mặt. Ứng dụng ngay: chế độ **Trắc nghiệm** và **Flashcard** của app."],
+  [/feynman/, "**Kỹ thuật Feynman** — giải thích khái niệm như dạy một đứa trẻ 10 tuổi:\n1. Viết tên khái niệm ra giấy.\n2. Giải thích bằng lời của mình, không dùng thuật ngữ chuyên ngành.\n3. Chỗ nào líu lại → đó chính là lỗ hổng hiểu biết → quay lại học đúng chỗ đó.\n4. Đơn giản hoá và dùng ví dụ đời thường.\nChỗ \"líu lại\" là tín hiệu đắt giá nhất — nó chỉ thẳng chỗ bạn tưởng mình hiểu."],
+  [/cornell/, "**Ghi chú Cornell** — chia trang thành 3 vùng:\n- Cột phải (rộng): chép ý chính khi nghe/đọc.\n- Cột trái (hẹp): viết từ khoá + câu hỏi tương ứng.\n- Dưới cùng: 2–3 dòng tóm tắt bằng lời của mình.\nÔn lại = che cột phải, tự hỏi theo cột trái. Ghi 1 lần, ôn được cả kỳ."],
+  [/mindmap|mind\s*map|sơ\s*đồ\s*tư\s*duy/, "**Sơ đồ tư duy (mindmap)**: chủ đề chính ở giữa → nhánh chính → lá, mỗi nhánh một màu. Phù hợp môn có cấu trúc phân nhánh (sinh học, lịch sử, văn học). Vẽ tay tốt hơn dùng app vì buộc bạn phải *chọn* ý chính — và chính lúc chọn đó não đang ghi nhớ."],
+  [/pomodoro/, "**Pomodoro** là kỹ thuật quản lý thời gian: học **25 phút** — nghỉ **5 phút**, sau 4 vòng nghỉ dài 15–30 phút. Điểm mấu chốt không phải con số 25, mà là *cam kết tập trung tuyệt đối trong 1 khối ngắn* — đủ ngắn để không thấy sợ, đủ dài để vào việc sâu."],
+  [/gpa|điểm\s*trung\s*bình\s*học\s*lực/, "**GPA** (điểm trung bình học lực) là trung bình có trọng số của điểm các học phần, trọng số = số tín chỉ. Công thức: GPA = Σ(điểm × tín chỉ) / Σ(tín chỉ). Ở VN thang 10 → quy đổi thang 4 khi cần hồ sơ du học: A ≈ 8.5–10, B ≈ 7–8.4, C ≈ 5.5–6.9, D ≈ 5."],
+  [/tín\s*chỉ/, "**Tín chỉ** là đơn vị đo khối lượng học tập: 1 tín chỉ ≈ 15 giờ học chính thức mỗi học kỳ. Môn 3 tín chỉ ≈ 45 giờ lên lớp + thời gian tự học tương đương. Học kỳ thường 12–18 tín chỉ — đừng đăng ký vượt quá nếu vẫn phải làm thêm/chạy deadline."],
+];
+
+function explainConcept(padded: string): string | null {
+  if (!/là\s*gì|nghĩa\s*là|vậy\s*là|cách\s*hiểu|khai\s*niệm/.test(padded)) {
+    // Cho phép hỏi trần trụi tên khái niệm: "sm-2", "pomodoro"…
+    const bare = CONCEPTS.find(([re]) => new RegExp(`^\\s*${re.source}\\s*[?.!]*$`, "i").test(padded));
+    return bare ? bare[1] : null;
+  }
+  const hit = CONCEPTS.find(([re]) => re.test(padded));
+  return hit ? hit[1] : null;
+}
+
+/** Máy tính an toàn: chỉ chữ số + toán tử + ngoặc, không cho chữ → không bị inject */
+function tryArithmetic(text: string): string | null {
+  // "X% của Y" — phần trăm
+  const pm = text.match(/(\d+(?:[.]\d+)?)\s*%\s*của\s*(\d+(?:[.]\d+)?)/i);
+  if (pm) return `${pm[1]}% của ${pm[2]} = **${String(Math.round(Number(pm[1]) * Number(pm[2])) / 100)}**`;
+
+  // Biểu thức số học dài từ 3 ký tự, có ít nhất 1 toán tử
+  const m = text.match(/[\d(][\d\s+\-*/().]{2,120}[\d)]/);
+  if (!m) return null;
+  // Chống nhầm ngày tháng: "25/11", "2026-11-11" khi câu có ngữ cảnh ngày
+  const expr0 = m[0].replace(/\s+/g, "");
+  if (/^\d{1,2}[\/-]\d{1,2}$/.test(expr0) || /(hạn|deadline|tháng\s|tuần\s|thứ\s|lịch|ngày)/i.test(text)) return null;
+  const expr = expr0;
+  if (!/[+\-*/]/.test(expr.slice(1))) return null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const val = Function(`"use strict"; return (${expr});`)() as unknown;
+    if (typeof val === "number" && Number.isFinite(val)) {
+      const pretty = Math.abs(val) < 1e15 ? String(Math.round(val * 1e6) / 1e6) : val.toExponential(6);
+      return `${m[0].trim()} = **${pretty}**`;
+    }
+  } catch {
+    /* biểu thức lỗi → không phải phép tính */
+  }
+  return null;
+}
+
+/** Thời gian Việt Nam (UTC+7) — server có thể ở múi giờ khác */
+function vnNowText(): string {
+  const d = new Date(Date.now() + 7 * 3600 * 1000);
+  const DOW = ["Chủ nhật", "Thứ hai", "Thứ ba", "Thứ tư", "Thứ năm", "Thứ sáu", "Thứ bảy"];
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${DOW[d.getUTCDay()]}, ${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)}/${d.getUTCFullYear()} — ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} (giờ VN)`;
+}
+
+/** Tung đồng xu / xúc xắc / số ngẫu nhiên / chọn giúp giữa các lựa chọn */
+function tryRandomOrChoose(text: string): string | null {
+  if (/tung\s*đồng\s*xu|đồng\s*xu|flip\s*coin/.test(text)) {
+    return pick(["🪙 Sấp!", "🪙 Ngửa!"], Math.floor(Math.random() * 2));
+  }
+  if (/súc\s*sắc|xúc\s*xắc|roll\s*dice|tung\s*xúc\s*xắc/.test(text)) {
+    return `🎲 Ra số **${1 + Math.floor(Math.random() * 6)}**!`;
+  }
+  const rm = text.match(/(?:số|con)\s*ngẫu\s*nhiên[^0-9]*(\d+)?\s*(?:từ|đến|-)?\s*(\d+)?/);
+  if (rm && /ngẫu\s*nhiên|random/.test(text)) {
+    const lo = rm[1] ? Number(rm[1]) : 1;
+    const hi = rm[2] ? Number(rm[2]) : lo + 99;
+    const a = Math.min(lo, hi);
+    const b = Math.max(lo, hi);
+    return `Số ngẫu nhiên (${a}–${b}): **${a + Math.floor(Math.random() * (b - a + 1))}** 🎯`;
+  }
+  // "chọn giúp mình X hay Y" / "giúp mình chọn X hoặc Y"
+  if (/(chọn|decide)/.test(text) && /\s(hay|hoặc)\s/.test(text)) {
+    const seg = text.replace(/.*?(?:chọn(?:\s*giúp(?:\s*mình)?)?|giúp\s*mình\s*chọn|help\s*me\s*decide(?:\s*between)?)\s*/i, "");
+    const opts = seg.split(/\s+(?:hay|hoặc|or)\s+/i).map((s) => s.replace(/[?.!]+$/g, "").trim()).filter(Boolean);
+    if (opts.length >= 2) {
+      const winner = opts[Math.floor(Math.random() * opts.length)];
+      return pick([`Mình chọn **${winner}** nhé — thế xong để khỏi đắn đo thêm 😄`, `Quyết định vậy: **${winner}**. Bắt tay vào luôn!`], Math.floor(Math.random() * 2));
+    }
+  }
+  return null;
+}
+
 /* ── 7.5 Tri thức phương pháp học có sẵn (không cần key) ── */
 
 function matchStudySkill(padded: string): string | null {
+  const concept = explainConcept(padded);
+  if (concept) return concept;
+
   const has = (...words: string[]) => words.some((w) => padded.includes(w));
 
   if (has(" nhớ lâu", " ghi nhớ", " nhớ dài", " học thuộc", " nhớ nhanh", " học sao")) {
@@ -846,6 +1001,72 @@ function matchStudySkill(padded: string): string | null {
     );
   }
 
+  if (has(" từ vựng", " tiếng anh", " học từ mới", " foreign language")) {
+    return (
+      "Học từ vựng (tiếng Anh…) — cách hiệu quả nhất từng được chứng minh:\n" +
+      "- **Học theo cụm, đừng học từ đơn**: \"make a decision\" nhớ bền hơn \"decision\" một mình — não nhớ theo ngữ cảnh.\n" +
+      "- **Flashcard 2 chiều**: Anh→Việt để đọc, Việt→Anh để viết & nói. Cùng một từ, hai đường nhớ khác nhau.\n" +
+      "- **Dùng ngay trong câu**: mỗi từ mới, tự đặt 1 câu về đời bạn. Câu cá nhân hoá nhớ lâu gấp nhiều lần câu mẫu.\n" +
+      "- **Số lượng thực tế**: 10 từ/ngày × đều đặn > 50 từ/ngày rồi bỏ sau 3 ngày. Thẻ nào hay quên, SM-2 ở trang **Ôn tập** sẽ tự đưa lên sớm.\n" +
+      "Tự tạo bộ thẻ riêng: gõ trong chat \"tạo thẻ hỏi: … đáp: …\" từng cặp, hoặc dán cả đoạn văn vào mode **Flashcard** để mình cắt giúp."
+    );
+  }
+
+  if (has(" nhiều deadline", " nhiều việc cùng", " quá nhiều việc", " chồng deadline", " deadline chồng", " việc cùng lúc")) {
+    return (
+      "Nhiều deadline chồng nhau — cách phân xử nhanh:\n" +
+      "- **Vẽ bảng 2×2** theo (deadline gần xa) × (hệ số điểm/thiệt hại): khối trên-trái (gần + nặng) làm trước, không thương lượng.\n" +
+      "- **Quy đổi sang giờ rảnh thật**: mỗi việc chia nhỏ theo *buổi*, không theo ngày — \"tối nay 45 phút làm phần X\" là cam kết thiệt, \"hôm nay làm X\" dễ trôi.\n" +
+      "- **Cắt phân phối**: việc gì chiếm <10% điểm nhưng >30% công → làm phiên bản tối thiểu trước, dư sức thì hoàn thiện sau.\n" +
+      "- **Nhờ trợ giúp sớm**: phần nào có thể hỏi bạn/thầy ngay hôm nay thì hỏi — đừng để lời giải đáp về lúc trước thi 1 tiếng.\n" +
+      "Dữ liệu app của bạn đã có sẵn độ khó + quan trọng + deadline — vào **Planner → AI** để thuật toán bày giúp cả tuần!"
+    );
+  }
+
+  if (has(" học nhóm", " làm việc nhóm", " nhóm bạn", " cùng bạn bè")) {
+    return (
+      "Học nhóm hiệu quả (và tránh thành cà phê trò chuyện):\n" +
+      "- **Đặt agenda trước**: mỗi buổi có đúng 1 mục tiêu — \"giải hết đề cuối kỳ môn X\". Không mục tiêu, không bắt đầu.\n" +
+      "- **Mỗi người dạy 1 phần**: ai giảng được phần của mình là hiểu sâu nhất (Feynman theo bầy đàn 😄). 25 phút học / 5 phút nghỉ như Pomodoro, ai cần hỏi thì ghi lại để hỏi giữa giờ nghỉ.\n" +
+      "- **Đề thi nhóm**: mỗi người soạn 3 câu hỏi khó → trao đổi nhau làm. Tạo đề khó hơn giải đề — và đó chính là lúc học sâu nhất.\n" +
+      "- **Giới hạn thành viên 3–5**: đông hơn dễ phân tán, ít hơn không đủ góc nhìn.\n" +
+      "Dùng app: cả nhóm cùng dán chương học vào **Tóm tắt** — mỗi người so sánh bản tóm tắt của nhau, khác biệt nào là chỗ cần bàn."
+    );
+  }
+
+  if (has(" đọc nhanh", " đọc sách", " đọc tài liệu", " speed reading", " đọc hiệu quả")) {
+    return (
+      "Đọc tài liệu học tập nhanh mà nhớ được:\n" +
+      "- **Đọc 3 lớp**: (1) lướt tiêu đề + mục lục + kết luận để có bản đồ; (2) đọc kỹ các phần đánh dấu khó; (3) đọc phục vụ khi làm bài — đừng đọc thẳng từ trang 1 đến cuối như tiểu thuyết.\n" +
+      "- **Tìm câu chủ đề**: trong văn học thuật, câu chủ đề thường nằm đầu hoặc cuối đoạn — nắm câu đó là nắm 80% ý đoạn.\n" +
+      "- **Đọc với câu hỏi sẵn**: trước khi đọc chương, viết 3 câu hỏi bạn muốn nó trả lời. Não đọc có mục tiêu nhanh hơn đọc vô định rất nhiều.\n" +
+      "- **Không highlight quá tay**: chỉ đánh dấu khi bạn *tự diễn lại được* ý đó bằng một câu của mình — highlight tràn màn hình là kiểu đọc giả vờ.\n" +
+      "Dán đoạn tài liệu vào mode **Tóm tắt** — mình rút ý chính + từ khoá + câu hỏi tự kiểm tra cho."
+    );
+  }
+
+  if (has(" học buổi sáng", " học buổi tối", " học đêm", " lúc nào học", " học giờ nào", " sáng học hay tối")) {
+    return (
+      "Học sáng hay học tối? Câu trả lời trung thực:\n" +
+      "- **Cố định > hoàn hảo**: cùng một khung giờ mỗi ngày sẽ thắng bất kỳ \"giờ vàng sinh học\" nào — não tạo thói quen theo tín hiệu lặp lại.\n" +
+      "- **Nháp này**: nếu sáng nào bạn cũng sái nước miếng lúc 7h thì đừng ép học lý thuyết khó lúc đó — dùng sáng cho việc cơ bắp của não: chép flashcard, làm bài tập quen. Khối lý thuyết mới để khung giờ bạn tỉnh nhất.\n" +
+      "- **Tối học nhưng *trước* giờ ngủ 1 tiếng**: vừa học xong đi ngủ ngay giúp củng cố trí nhớ (ngủ là lúc não \"ghi đĩa\"). Thức khuya học thêm là xoá công việc vừa làm.\n" +
+      "- **Vàng rơi**: 25 phút ngay sau khi tỉnh dậy — đầu chưa dính thông tin nào, gọi là \"khối học đầu tiên trong ngày\", hiệu quả thường bất ngờ.\n" +
+      "Nhớ: chất lượng giấc ngủ là bộ nhớ đệm của mọi giờ học — thiếu ngủ là mất trắng."
+    );
+  }
+
+  if (has(" quên ngay", " học trước quên sau", " học xong quên", " học xong là quên")) {
+    return (
+      "\"Học xong quên ngay\" — tin tốt là chuyện bình thường của não, không phải bạn dốt. Chuyện bình thường thứ hai: nó chữa được.\n" +
+      "- **Nguyên nhân**: não xoá thông tin *không được dùng lại* trong 24–48 giờ — đường cong lãng quên của Ebbinghaus dốc nhất ngay sau khi học.\n" +
+      "- **Chữa 1 — ôn đúng thời điểm**: ôn lại sau 1 ngày, rồi 3 ngày, rồi 1 tuần. Mỗi lần ôn là một lần \"làm phẳng\" đường cong. App phần **Ôn tập** đã tự động hoá chính xác lịch này (SM-2).\n" +
+      "- **Chữa 2 — đổi cách nhập**: đừng đọc lại — hãy *tự kiểm tra* (đóng tài liệu, viết ra những gì nhớ được). Khoảng trống khi nhớ là chính lúc trí nhớ đang được đúc.\n" +
+      "- **Chữa 3 — gắn với thứ bạn đã biết**: từ mới gắn với hình ảnh/câu chuyện/cái buồn cười thì nhớ theo kiểu khác, bền hơn.\n" +
+      "Hôm nay học gì, tối nay thử tự viết ra 5 ý chính không nhìn tài liệu — làm ngay hôm nay là thấy khác."
+    );
+  }
+
   return null;
 }
 
@@ -853,7 +1074,7 @@ function matchStudySkill(padded: string): string | null {
 
 export function runLocalAI(input: LocalInput): LocalOutput {
   const prompt = clampText(input.prompt, 6000);
-  const ctx = asObj(typeof input.context === "object" ? input.context : undefined);
+  const ctx = asObj(input.context);
   try {
     switch (input.mode) {
       case "chat":
