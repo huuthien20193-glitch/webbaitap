@@ -21,6 +21,14 @@ export interface LocalOutput {
   text?: string;
   json?: unknown;
   error?: string;
+  /** Lệnh hành động AI đề xuất — client thực thi trực tiếp trong app */
+  action?: AIAction;
+}
+
+/** Hành động AI có thể tự làm trong app (client thực thi qua useData) */
+export interface AIAction {
+  type: "createTask" | "completeTask" | "createCourse" | "createExam" | "createFlashcard";
+  args: Record<string, unknown>;
 }
 
 const BAD = new Set(
@@ -359,6 +367,184 @@ export function localReport(ctx: Record<string, unknown>): LocalOutput {
   return { text };
 }
 
+/* ── 6.5 Lệnh hành động: "tạo nhiệm vụ X hạn mai", "việc Y xong rồi" ── */
+
+function escRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Đọc ngày tiếng Việt: "mai", "hôm nay", "2 ngày nữa", "thứ 5", "25/11", "2026-11-20"… */
+function parseVNDate(text: string, today: string): { date: string; matched: string } | null {
+  const t = text.toLowerCase();
+  let m = t.match(/\b([12]\d{3}-[01]\d-[0-3]\d)\b/);
+  if (m) return { date: m[1], matched: m[1] };
+
+  m = t.match(/\b([0-3]?\d)\s*[\/-]\s*([01]?\d)(?:\s*[\/-]\s*([12]\d{3}))?\b/);
+  if (m) {
+    const day = Math.min(31, Math.max(1, Number(m[1])));
+    const mon = Math.min(12, Math.max(1, Number(m[2])));
+    const y = m[3] ? Number(m[3]) : Number(today.slice(0, 4));
+    let date = `${y}-${String(mon).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    if (!m[3] && date < today) date = `${y + 1}-${String(mon).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    return { date, matched: m[0] };
+  }
+
+  m = t.match(/\b(\d+)\s*tuần\s*(nữa|tới|sau)?\b/);
+  if (m) return { date: shiftDateStr(today, Number(m[1]) * 7), matched: m[0] };
+
+  m = t.match(/\b(\d+)\s*ngày\s*(nữa|tới|sau)?\b/);
+  if (m) return { date: shiftDateStr(today, Number(m[1])), matched: m[0] };
+
+  if (/\bhôm\s*nay\b/.test(t)) return { date: today, matched: "hôm nay" };
+  if (/\bmốt\b/.test(t)) return { date: shiftDateStr(today, 2), matched: t.match(/\bngày\s*mốt\b/)?.[0] ?? "mốt" };
+  if (/\bngày\s*mai\b/.test(t)) return { date: shiftDateStr(today, 1), matched: "ngày mai" };
+  if (/\bmai\b/.test(t)) return { date: shiftDateStr(today, 1), matched: "mai" };
+  if (/\btuần\s*sau\b/.test(t)) return { date: shiftDateStr(today, 7), matched: "tuần sau" };
+  if (/\btháng\s*sau\b/.test(t)) return { date: shiftDateStr(today, 30), matched: "tháng sau" };
+
+  const WEEKDAYS: [RegExp, number][] = [
+    [/thứ\s*2|thứ\s*hai/, 1], [/thứ\s*3|thứ\s*ba/, 2], [/thứ\s*4|thứ\s*tư/, 3],
+    [/thứ\s*5|thứ\s*năm/, 4], [/thứ\s*6|thứ\s*sáu/, 5], [/thứ\s*7|thứ\s*bảy/, 6],
+    [/chủ\s*nhật/, 0],
+  ];
+  for (const [re, target] of WEEKDAYS) {
+    m = t.match(re);
+    if (m) {
+      const dow = new Date(`${today}T00:00:00`).getDay();
+      const off = ((target - dow + 7) % 7) || 7;
+      return { date: shiftDateStr(today, off), matched: m[0] };
+    }
+  }
+  return null;
+}
+
+function cleanTitle(s: string): string {
+  // Lưu ý: \b của JS sai với ký tự tiếng Việt (ưu, gấp, tất…) → dùng khoảng trắng thay \b
+  return ` ${s} `
+    .replace(/ (?:hạn(?: vào| là| trước)?|deadline|bắt đầu|khoảng|mất|tốn|nữa|tới|đến|trước)(?=\s|$)/gi, " ")
+    .replace(/[,.;:!…]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Nhận lệnh hành động từ tin nhắn tự nhiên. Trả về reply + action (nếu thực thi được). */
+export function parseChatAction(raw: string, ctx: Record<string, unknown>): { action?: AIAction; reply: string } | null {
+  const text = clampText(raw, 300).trim();
+  if (!text) return null;
+  const t = text.toLowerCase();
+  const today = /^[12]\d{3}-[01]\d-[0-3]\d$/.test(clampText(ctx.today, 10)) ? clampText(ctx.today, 10) : todayStr();
+  const seed = hashStr(t + today);
+  const courseNames = Array.isArray(ctx.courses) ? (ctx.courses as unknown[]).map((c) => clampText(c, 40)).filter(Boolean) : [];
+  const openTitles = Array.isArray(ctx.openTaskTitles) ? (ctx.openTaskTitles as unknown[]).map((x) => clampText(x, 80)).filter(Boolean) : [];
+  // Câu hỏi mang tính hỏi đáp ("giờ nên làm gì?") không phải lệnh hoàn thành
+  const questiony = /\b(nên|cách|thế nào|như thế nào|sao|vì sao|tại sao)\b/.test(t);
+
+  /* ── Tạo nhiệm vụ ── */
+  let m = text.match(/(?:tạo|thêm|đặt|lập)\s+(?:một\s+)?(?:việc|nhiệm\s*vụ|task)\s*(?:mới)?\s*[:\-—]?\s*(.+)/i);
+  if (m) {
+    let rest = m[1];
+    const date = parseVNDate(rest, today);
+    if (date) rest = rest.replace(new RegExp(escRe(date.matched), "i"), " ");
+    let minutes = 30;
+    const mm = rest.match(/(\d+)\s*(?:phút\b|\bp\b)/i) ?? rest.match(/(\d+)\s*giờ/i);
+    if (mm) {
+      minutes = /giờ/i.test(mm[0]) ? Number(mm[1]) * 60 : Number(mm[1]);
+      minutes = Math.min(600, Math.max(10, minutes));
+      rest = rest.replace(mm[0], " ");
+    }
+    let priority: "low" | "medium" | "high" = "medium";
+    // \b của JS không đúng với ký tự tiếng Việt (ưu, gấp, tất…) → dùng khoảng trắng thay \b
+    const padded = ` ${rest.replace(/\s+/g, " ").trim()} `;
+    if (/ (?:gấp|quan trọng|ưu tiên cao) /.test(padded)) priority = "high";
+    else if (/ (?:ưu tiên thấp|thấp) /.test(padded)) priority = "low";
+    rest = padded.replace(/ (?:gấp|quan trọng|ưu tiên (?:cao|thấp)|ưu tiên|cao|thấp|hạn|ngày|đến|deadline|vào|trong|với)(?=\s|$)/gi, " ");
+    const course = courseNames.find((c) => rest.toLowerCase().includes(c.toLowerCase()));
+    if (course) rest = rest.replace(new RegExp(escRe(course), "i"), " ");
+    const title = cleanTitle(rest);
+    if (!title || title.length < 2) {
+      return { reply: "Tên nhiệm vụ chưa rõ nè — thử “tạo nhiệm vụ Làm lab 3 hạn mai 45 phút” nhé." };
+    }
+    return {
+      action: { type: "createTask", args: { title, dueDate: date?.date ?? today, priority, estMinutes: minutes, course: course ?? "" } },
+      reply: pick([`Ok! Chờ mình tạo việc **${title}** nhé…`, `Hiểu rồi — mình thêm **${title}** vào danh sách liền…`], seed),
+    };
+  }
+
+  /* ── Hoàn thành nhiệm vụ ── */
+  const paddedT = ` ${t} `;
+  if (/ (?:xong|hoàn thành|hoàn tất|đánh dấu) /.test(paddedT) && !questiony) {
+    let title = "";
+    const before = text.match(/(?:việc|nhiệm\s*vụ|task)\s+(.{2,80}?)\s+(?:xong|hoàn\s*thành|hoàn\s*tất|được\s*rồi|xong\s*rồi)/i);
+    const after = text.match(/(?:đánh\s*dấu|hoàn\s*thành|hoàn\s*tất|làm\s*xong|xong\s*rồi|xong)\s*(?:việc|nhiệm\s*vụ|task)?\s*["'“”«]?([^"'“”»]+)?["'“”»]?/i);
+    if (before) title = cleanTitle(before[1]);
+    else if (after?.[1]) title = cleanTitle(after[1]);
+    const want = title.toLowerCase();
+    if (want) {
+      const matched =
+        openTitles.find((x) => x.toLowerCase() === want) ??
+        openTitles.find((x) => x.toLowerCase().includes(want) || want.includes(x.toLowerCase())) ??
+        "";
+      if (matched) {
+        return {
+          action: { type: "completeTask", args: { title: matched } },
+          reply: pick([`Ok, để mình đánh dấu **${matched}** là hoàn thành…`, `Giỏi ghê! Chờ mình cập nhật **${matched}** nhé…`], seed),
+        };
+      }
+      return { reply: `Mình không thấy việc nào đang mở khớp “${title}”. Bạn nói lại tên chính xác giúp nhé (xem danh sách ở trang Nhiệm vụ).` };
+    }
+    return { reply: "Bạn muốn đánh dấu việc nào xong? Nói kiểu “việc Đọc chương 2 xong rồi” nhé." };
+  }
+
+  /* ── Tạo kỳ thi ── */
+  m = text.match(/(?:tạo|thêm|đặt|ghi)\s+(?:kỳ\s*thi|bài\s*kiểm\s*tra|lịch\s*thi|đề\s*thi|lịch\s*kiểm\s*tra|thi)\b\s*(?:mới)?\s*[:\-—]?\s*(.+)/i);
+  if (m) {
+    let rest = m[1];
+    const date = parseVNDate(rest, today);
+    if (date) rest = rest.replace(new RegExp(escRe(date.matched), "i"), " ");
+    const course = courseNames.find((c) => rest.toLowerCase().includes(c.toLowerCase()));
+    if (course) rest = rest.replace(new RegExp(escRe(course), "i"), " ");
+    const title = cleanTitle(rest);
+    if (!title) {
+      return { reply: "Kỳ thi tên gì nhỉ? Thử “tạo kỳ thi Giữa kỳ Toán hạn 25/11” nhé." };
+    }
+    return {
+      action: { type: "createExam", args: { title, date: date?.date ?? "", course: course ?? "" } },
+      reply: `Ok, mình lưu kỳ thi **${title}**${date ? ` — ngày ${date.date}` : ""}…`,
+    };
+  }
+
+  /* ── Tạo môn học ── */
+  m = text.match(/(?:tạo|thêm)\s+(?:một\s+)?(?:môn\s*học|môn\s*mới|học\s*phần|môn)\s*(?:mới)?\s*[:\-—]?\s*(.+)/i);
+  if (m) {
+    const title = cleanTitle(m[1]);
+    if (!title) {
+      return { reply: "Tên môn học chưa rõ — thử “tạo môn học Cơ sở dữ liệu” nhé." };
+    }
+    return { action: { type: "createCourse", args: { title } }, reply: `Ok, mình thêm môn **${title}** vào học phần của bạn…` };
+  }
+
+  /* ── Tạo 1 thẻ flashcard ── */
+  m = text.match(/tạo\s*thẻ\s*(?:mới)?\s*:?\s*(.+)/i);
+  if (m) {
+    const rest = m[1];
+    const qa = rest.match(/hỏi\s*[:=]?\s*(.+?)\s*[,;|]?\s*đáp\s*(?:án)?\s*[:=]?\s*(.+)/i);
+    const sep = rest.match(/(.+?)\s*(?:→|–|-|\||\/)\s*(.+)/);
+    const def = rest.match(/(.+?)\s+là\s+(.+)/i);
+    if (qa) {
+      return { action: { type: "createFlashcard", args: { question: cleanTitle(qa[1]), answer: cleanTitle(qa[2]) } }, reply: "Ok, mình thêm thẻ này vào Ôn tập luôn…" };
+    }
+    if (sep) {
+      return { action: { type: "createFlashcard", args: { question: cleanTitle(sep[1]), answer: cleanTitle(sep[2]) } }, reply: "Ok, mình thêm thẻ này vào Ôn tập luôn…" };
+    }
+    if (def) {
+      return { action: { type: "createFlashcard", args: { question: `${cap(def[1])} là gì?`, answer: `${def[1]} là ${def[2]}` } }, reply: "Ok, mình thêm thẻ này vào Ôn tập luôn…" };
+    }
+    return { reply: "Format thẻ: “tạo thẻ hỏi: Con trỏ là gì? đáp: Biến lưu địa chỉ” — hoặc dùng mode **Flashcard** để tạo hàng loạt từ bài học nhé." };
+  }
+
+  return null;
+}
+
 /* ── 7. Trò chuyện offline (giọng tự nhiên, chỉ dựa dữ liệu thật) ── */
 
 function hashStr(s: string): number {
@@ -377,7 +563,8 @@ function daysUntil(date: string, today: string): number {
 
 export function localChat(input: LocalInput): LocalOutput {
   const msgs = Array.isArray(input.messages) ? input.messages.filter((m) => clampText(m.content, 1)) : [];
-  const lastUser = clampText([...msgs].reverse().find((m) => (m.role ?? "user") === "user")?.content, 300).toLowerCase();
+  const lastUserRaw = clampText([...msgs].reverse().find((m) => (m.role ?? "user") === "user")?.content, 300);
+  const lastUser = lastUserRaw.toLowerCase();
   const ctx = asObj(input.context);
   const hasCtx = Object.keys(ctx).length > 1;
   const today = /^[12]\d{3}-[01]\d-[0-3]\d$/.test(clampText(ctx.today, 10)) ? clampText(ctx.today, 10) : todayStr();
@@ -397,6 +584,12 @@ export function localChat(input: LocalInput): LocalOutput {
   const tail = hasCtx
     ? ""
     : "\n\n(Nhỏ thôi: trang đang không gửi được dữ liệu học tập — bạn đăng nhập rồi hỏi ở đây, mình sẽ đọc số liệu thật của bạn.)";
+
+  /* Lệnh hành động — ưu tiên cao nhất: "tạo nhiệm vụ…", "…xong rồi"… */
+  const cmd = parseChatAction(lastUserRaw, ctx);
+  if (cmd) {
+    return { text: cmd.reply + (cmd.action ? "" : tail), ...(cmd.action ? { action: cmd.action } : {}) };
+  }
 
   /* Nhận xét tổng thể theo dữ liệu — dùng cho câu mở/kết */
   const mood =
@@ -539,7 +732,12 @@ export function localChat(input: LocalInput): LocalOutput {
             "Hi 👋 Mình đây. Muốn xem tình hình học hiện tại, tìm việc nên làm kế, hay dán bài học vào đây để mình tóm tắt/câu hỏi?",
           ],
           seed
-        ) + tail,
+        ) +
+        "\n\nMình còn **làm trực tiếp** được nữa nhé:\n" +
+        "- “tạo nhiệm vụ Làm lab 3 hạn mai 45 phút” — mình thêm việc vào app luôn\n" +
+        "- “việc Đọc chương 2 xong rồi” — mình đánh dấu hoàn thành giúp\n" +
+        "- “tạo môn học Cơ sở dữ liệu” / “tạo kỳ thi Giữa kỳ hạn 25/11”" +
+        tail,
     };
   }
 
@@ -566,7 +764,8 @@ export function localChat(input: LocalInput): LocalOutput {
         ],
         seed
       ) +
-      "\n\nCòn muốn hỏi tự do như ChatGPT (giải thích khái niệm, kiến thức tổng quát)? Chỉ cần **GEMINI_API_KEY**: tạo miễn phí ở aistudio.google.com/apikey → Render → service webbaitap → Environment → dán key → Save. 2 phút, không cần sửa code." +
+      "\n\nMình **làm trực tiếp** được trong app: “tạo nhiệm vụ X hạn mai”, “việc X xong rồi”, “tạo môn học X”, “tạo kỳ thi X hạn 25/11”, “tạo thẻ hỏi: … đáp: …”.\n" +
+      "Còn muốn hỏi tự do như ChatGPT (giải thích khái niệm, kiến thức tổng quát)? Chỉ cần **GEMINI_API_KEY**: tạo miễn phí ở aistudio.google.com/apikey → Render → service webbaitap → Environment → dán key → Save. 2 phút, không cần sửa code." +
       tail,
   };
 }

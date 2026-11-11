@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
  * - Giới hạn độ dài dữ liệu vào/out; JSON guard (tách khối ```json / {...}).
  */
 
-import { runLocalAI, type LocalMode } from "@/lib/ai-local";
+import { parseChatAction, runLocalAI, type LocalMode } from "@/lib/ai-local";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -180,6 +180,7 @@ export async function POST(req: NextRequest) {
     const payload: Record<string, unknown> = { mode, engine: "local" };
     if (local.text) payload.text = local.text;
     if (local.json !== undefined) payload.json = local.json;
+    if (local.action) payload.action = local.action;
     if (local.error) payload.error = local.error;
     return NextResponse.json(payload, { status: 200 });
   }
@@ -190,6 +191,14 @@ export async function POST(req: NextRequest) {
 
     if (mode === "chat") {
       if (messages.length === 0) return NextResponse.json({ error: "Thiếu nội dung trò chuyện" }, { status: 400 });
+      // Lệnh hành động ("tạo nhiệm vụ…", "…xong rồi") hoạt động cả khi có key —
+      // xử lý trực tiếp bằng parser, không cần gọi Gemini.
+      const cmd = parseChatAction(messages[messages.length - 1].content ?? "", parseCtx(body.context));
+      if (cmd) {
+        const payload: Record<string, unknown> = { mode, engine: "local", text: cmd.reply };
+        if (cmd.action) payload.action = cmd.action;
+        return NextResponse.json(payload, { status: 200 });
+      }
       // Lịch sử → turn đúng role của Gemini ("model" thay cho "assistant");
       // tin nhắn cuối (user) là phần cần trả lời.
       const history = messages.slice(0, -1);
@@ -238,6 +247,7 @@ export async function POST(req: NextRequest) {
     else {
       if (local.text) payload.text = local.text;
       if (local.json !== undefined) payload.json = local.json;
+      if (local.action) payload.action = local.action;
     }
     return NextResponse.json(payload, { status: 200 });
   }

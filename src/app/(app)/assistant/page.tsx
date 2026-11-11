@@ -19,7 +19,7 @@ import { Badge, Button, Card, EmptyState, LoadingBlock, Modal } from "@/componen
 import { useData } from "@/lib/data";
 import { useToast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
-import { askAI, asObjectArray, num, str } from "@/lib/ai";
+import { askAI, asObjectArray, num, str, type AIAction } from "@/lib/ai";
 import { taskStats, minutesByCourse, courseProgress } from "@/lib/stats";
 import { shiftDateStr, todayStr } from "@/lib/date";
 import type { ChatMessage, Conversation } from "@/lib/types";
@@ -54,7 +54,7 @@ function uid(): string {
 }
 
 export default function AssistantPage() {
-  const { loading, conversations, saveConversation, deleteConversation, courses, tasks, sessions, exams, examResults, chapters, flashcards, addFlashcard } = useData();
+  const { loading, conversations, saveConversation, deleteConversation, courses, tasks, sessions, exams, examResults, chapters, flashcards, addTask, updateTask, addCourse, addExam, addFlashcard } = useData();
   const { push } = useToast();
 
   const [conv, setConv] = useState<Conversation | null>(null);
@@ -101,6 +101,7 @@ export default function AssistantPage() {
       exams: exams.slice(0, 6).map((e) => ({ title: e.title, date: e.examDate, course: courseMap.get(e.courseId ?? "")?.name ?? "" })),
       examResults: examResults.slice(0, 10).map((r) => ({ exam: exams.find((x) => x.id === r.examId)?.title ?? "", score: r.score })),
       flashcardsDue: flashcards.filter((f) => f.dueDate <= todayStr()).length,
+      openTaskTitles: tasks.filter((t) => t.status !== "done").slice(0, 25).map((t) => t.title),
       weakestChapters: chapters.filter((c) => c.understanding <= 2).slice(0, 8).map((c) => ({ course: courseMap.get(c.courseId)?.name ?? "", chapter: c.title })),
     }),
     [courses, tasks, sessions, exams, examResults, chapters, flashcards, courseMap]
@@ -116,6 +117,104 @@ export default function AssistantPage() {
     });
     setMeta({});
   }, []);
+
+  /** Thực thi hành động AI đề xuất — thao tác trực tiếp vào dữ liệu app */
+  async function runAction(action: AIAction): Promise<{ ok: boolean; text: string }> {
+    const now = new Date().toISOString();
+    const today = todayStr();
+    const findCourse = (name: string) => {
+      const n = name.trim().toLowerCase();
+      if (!n) return undefined;
+      return courses.find((c) => c.name.toLowerCase().includes(n) || n.includes(c.name.toLowerCase()));
+    };
+    try {
+      switch (action.type) {
+        case "createTask": {
+          const title = str(action.args.title);
+          if (!title) return { ok: false, text: "Mình chưa nghe rõ tên nhiệm vụ — thử “tạo nhiệm vụ <tên> hạn <ngày>” nhé." };
+          const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(str(action.args.dueDate)) ? str(action.args.dueDate) : today;
+          const priority = action.args.priority === "high" || action.args.priority === "low" ? action.args.priority : "medium";
+          const estMinutes = Math.min(600, Math.max(10, Math.round(num(action.args.estMinutes, 30))));
+          const course = findCourse(str(action.args.course));
+          await addTask({
+            courseId: course?.id ?? null,
+            title,
+            description: "",
+            startDate: today,
+            dueDate,
+            priority,
+            status: "todo",
+            estMinutes,
+            difficulty: 3,
+            importance: priority === "high" ? 5 : priority === "low" ? 2 : 3,
+            progress: 0,
+            completedAt: null,
+            createdAt: now,
+          });
+          const dueText = dueDate === today ? "hạn hôm nay" : `hạn ${dueDate}`;
+          return {
+            ok: true,
+            text: `✓ Đã tạo nhiệm vụ **${title}** — ${dueText}, ưu tiên ${priority === "high" ? "cao" : priority === "low" ? "thấp" : "vừa"}, dự kiến ${estMinutes} phút${course ? ` (môn ${course.name})` : ""}. Xem ở trang **Nhiệm vụ** nhé!`,
+          };
+        }
+        case "completeTask": {
+          const want = str(action.args.title).trim().toLowerCase();
+          const open = tasks.filter((t) => t.status !== "done");
+          const hit =
+            open.find((t) => t.title.toLowerCase() === want) ??
+            open.find((t) => t.title.toLowerCase().includes(want) || (want.length > 3 && want.includes(t.title.toLowerCase())));
+          if (!hit) return { ok: false, text: `Mình không tìm thấy việc nào đang mở khớp “${str(action.args.title)}” — bạn nói lại tên chính xác giúp nhé.` };
+          await updateTask(hit.id, { status: "done", progress: 100, completedAt: now });
+          return { ok: true, text: `✓ Xong **${hit.title}** rồi! 🎉 Cố giữ nhịp nhé.` };
+        }
+        case "createCourse": {
+          const name = str(action.args.title);
+          if (!name) return { ok: false, text: "Tên môn học chưa rõ — thử “tạo môn học Cơ sở dữ liệu” nhé." };
+          const palette = ["#7c3aed", "#2563eb", "#059669", "#d97706", "#dc2626", "#0891b2", "#be185d"];
+          await addCourse({
+            name,
+            code: "",
+            instructor: "",
+            credits: 3,
+            description: "",
+            color: palette[courses.length % palette.length],
+            goal: "",
+            createdAt: now,
+          });
+          return { ok: true, text: `✓ Đã thêm môn **${name}** — vào trang **Môn học** để thêm chương & nhiệm vụ cho môn này.` };
+        }
+        case "createExam": {
+          const title = str(action.args.title) || "Kỳ thi";
+          const examDate = /^\d{4}-\d{2}-\d{2}$/.test(str(action.args.date)) ? str(action.args.date) : today;
+          const course = findCourse(str(action.args.course));
+          await addExam({ title, courseId: course?.id ?? null, examDate, note: "", createdAt: now });
+          return { ok: true, text: `✓ Đã lưu kỳ thi **${title}** — ngày ${examDate}${course ? ` (môn ${course.name})` : ""}. Planner sẽ ưu tiên ôn cho bạn.` };
+        }
+        case "createFlashcard": {
+          const q = str(action.args.question);
+          const a = str(action.args.answer);
+          if (!q || !a) return { ok: false, text: "Thẻ cần đủ hỏi–đáp. Format: “tạo thẻ hỏi: <câu hỏi> đáp: <câu trả lời>”." };
+          const course = findCourse(str(action.args.course));
+          await addFlashcard({
+            courseId: course?.id ?? null,
+            chapterId: null,
+            question: q,
+            answer: a,
+            ease: 2.5,
+            interval: 0,
+            repetitions: 0,
+            dueDate: today,
+            createdAt: now,
+          });
+          return { ok: true, text: `✓ Đã thêm thẻ — **${q}**. Vào trang **Ôn tập** để ôn nhé, SM-2 sẽ xếp lịch.` };
+        }
+        default:
+          return { ok: false, text: "Hành động này mình chưa hỗ trợ." };
+      }
+    } catch {
+      return { ok: false, text: "Mình chưa thực hiện được hành động này — thử lại giúp mình nhé." };
+    }
+  }
 
   async function handleGenerateFlashcards(cards: FlashcardDraft[]) {
     try {
@@ -171,6 +270,13 @@ export default function AssistantPage() {
 
       let assistantContent = res.text ?? "";
       const newMeta: MessageMeta = {};
+
+      // Chat mode: nếu AI đề xuất hành động → thực thi trực tiếp trong app
+      if (mode === "chat" && res.action) {
+        const exec = await runAction(res.action);
+        assistantContent = exec.ok ? exec.text : `${assistantContent}\n\n⚠️ ${exec.text}`;
+        push(exec.ok ? "AI đã thực hiện hành động" : "AI không thực hiện được hành động", exec.ok ? "success" : "error");
+      }
 
       // Mode JSON: flashcards / questions
       if (mode === "flashcards" || mode === "questions") {
@@ -311,7 +417,7 @@ export default function AssistantPage() {
                   </div>
                   <div>
                     <p className="font-semibold">Trợ lý AI của StudyOS</p>
-                    <p className="mt-1 text-sm text-muted">Hỏi đáp kiến thức, tóm tắt tài liệu, tạo flashcard &amp; trắc nghiệm, đề xuất lịch học…</p>
+                    <p className="mt-1 text-sm text-muted">Hỏi đáp, tóm tắt, flashcard, trắc nghiệm — còn <b>ra lệnh</b> được: “tạo nhiệm vụ X hạn mai”, “việc X xong rồi”…</p>
                   </div>
                   <div className="mt-2 flex flex-wrap justify-center gap-2">
                     <Button variant="secondary" className="text-xs" onClick={() => void analyze()}>

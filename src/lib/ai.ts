@@ -8,11 +8,18 @@ export interface AIPayload {
   messages?: { role: "user" | "assistant"; content: string }[];
 }
 
+export interface AIAction {
+  type: "createTask" | "completeTask" | "createCourse" | "createExam" | "createFlashcard";
+  args: Record<string, unknown>;
+}
+
 export interface AIResult {
   text?: string;
   json?: unknown;
   parseWarning?: string;
   error?: string;
+  /** Lệnh hành động AI đề xuất — client thực thi trong app */
+  action?: AIAction;
 }
 
 export async function askAI(mode: AIMode, payload: AIPayload): Promise<AIResult> {
@@ -27,8 +34,12 @@ export async function askAI(mode: AIMode, payload: AIPayload): Promise<AIResult>
       const msg = typeof j === "object" && j !== null && "error" in j ? String((j as { error: unknown }).error) : `Lỗi máy chủ (${res.status})`;
       return { error: msg };
     }
-    const box = j as { text?: string; json?: unknown; parseWarning?: string };
-    return { text: box.text, json: box.json ?? null, parseWarning: box.parseWarning };
+    const box = j as { text?: string; json?: unknown; parseWarning?: string; action?: unknown };
+    const action =
+      typeof box.action === "object" && box.action !== null && typeof (box.action as { type?: unknown }).type === "string"
+        ? (box.action as AIAction)
+        : undefined;
+    return { text: box.text, json: box.json ?? null, parseWarning: box.parseWarning, action };
   } catch {
     return { error: "Không kết nối được tới máy chủ AI." };
   }
