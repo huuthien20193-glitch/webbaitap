@@ -470,8 +470,11 @@ export default function AssistantPage() {
                 );
               })}
               {thinking && (
-                <div className="flex justify-start">
-                  <div className="flex items-center gap-2 rounded-2xl border border-border bg-surface-2 px-4 py-3 text-sm text-muted">
+                <div className="flex justify-start gap-2.5">
+                  <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-md shadow-indigo-600/25" aria-hidden>
+                    <Bot size={15} />
+                  </div>
+                  <div className="flex items-center gap-2 rounded-2xl rounded-bl-sm border border-border bg-surface-2 px-4 py-3 text-sm text-muted">
                     <Loader2 className="h-4 w-4 animate-spin text-violet-500" /> AI đang soạn câu trả lời…
                   </div>
                 </div>
