@@ -359,7 +359,21 @@ export function localReport(ctx: Record<string, unknown>): LocalOutput {
   return { text };
 }
 
-/* ── 7. Trò chuyện offline ───────────────────────────────── */
+/* ── 7. Trò chuyện offline (giọng tự nhiên, chỉ dựa dữ liệu thật) ── */
+
+function hashStr(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+function pick<T>(arr: T[], seed: number): T {
+  return arr[seed % arr.length];
+}
+
+function daysUntil(date: string, today: string): number {
+  return Math.round((new Date(date).getTime() - new Date(today).getTime()) / 86400000);
+}
 
 export function localChat(input: LocalInput): LocalOutput {
   const msgs = Array.isArray(input.messages) ? input.messages.filter((m) => clampText(m.content, 1)) : [];
@@ -367,6 +381,7 @@ export function localChat(input: LocalInput): LocalOutput {
   const ctx = asObj(input.context);
   const hasCtx = Object.keys(ctx).length > 1;
   const today = /^[12]\d{3}-[01]\d-[0-3]\d$/.test(clampText(ctx.today, 10)) ? clampText(ctx.today, 10) : todayStr();
+  const seed = hashStr(lastUser + today);
 
   const taskStats = asObj(ctx.taskStats);
   const openTasks = Number(taskStats.open);
@@ -381,34 +396,86 @@ export function localChat(input: LocalInput): LocalOutput {
 
   const tail = hasCtx
     ? ""
-    : "\n\n(Trang đang không gửi được dữ liệu học tập — hãy dùng mục này sau khi đăng nhập, AI sẽ đọc số liệu thật của bạn.)";
+    : "\n\n(Nhỏ thôi: trang đang không gửi được dữ liệu học tập — bạn đăng nhập rồi hỏi ở đây, mình sẽ đọc số liệu thật của bạn.)";
 
-  if (/tiến\s*độ|phân\s*tích|báo\s*cáo|tổng\s*quan|tình\s*hình|học\s*ra\s*sao/.test(lastUser) && hasCtx) {
-    const lines = [
-      `**Tổng quan học tập (dữ liệu đến ${today}):**`,
-      Number.isFinite(openTasks) ? `- Nhiệm vụ đang mở: ${openTasks}${overdue ? ` (⚠️ ${overdue} quá hạn)` : ""}` : "",
-      Number.isFinite(weeklyMinutes) ? `- Thời gian học 7 ngày qua: ${fmtMin(weeklyMinutes)}` : "",
-      Number.isFinite(dueCards) ? `- Flashcard đến hạn: ${dueCards}` : "",
-      progressByCourse.length > 0
-        ? `- Tiến độ môn: ${progressByCourse.slice(0, 4).map((p) => `${clampText(p.course, 30)} (${clampText(p.tasks, 12)})`).join(", ")}`
-        : courseNames.length > 0
-          ? `- Môn: ${courseNames.join(", ")}`
-          : "",
-      weakest.length > 0 ? `- Chương yếu nhất: ${clampText(asObj(weakest[0]).chapter, 40)} (${clampText(asObj(weakest[0]).course, 30)})` : "",
-      exams.length > 0 ? `- Kỳ thi sắp tới: ${clampText(asObj(exams[0]).title, 40)} — ${clampText(asObj(exams[0]).date, 12)}` : "",
-      "",
-      "**Việc nên làm đầu tiên:** mở Planner → hàng đợi ưu tiên → làm dòng đầu tiên (điểm số cao nhất theo thuật toán xếp hạng).",
-    ].filter(Boolean);
+  /* Nhận xét tổng thể theo dữ liệu — dùng cho câu mở/kết */
+  const mood =
+    overdue > 0 ? "có một chút áp lực" : weeklyMinutes >= 300 ? "rất đáng nể" : weeklyMinutes > 0 ? "ổn" : "đang nghỉ hơi lâu";
+
+  if (/tiến\s*độ|phân\s*tích|báo\s*cáo|tổng\s*quan|tình\s*hình|học\s*ra\s*sao|sao\s*rồi|như\s*thế\s*nào/.test(lastUser) && hasCtx) {
+    const lines: string[] = [];
+    lines.push(
+      pick(
+        [
+          `Mình vừa soát lại toàn bộ dữ liệu của bạn — nhìn chung ${mood}. Nhìn nhanh thế này:`,
+          "Để mình kể ngắn gọn tình hình học của bạn nhé:",
+          "Mình đã đọc xong số liệu của bạn, đây là bức tranh hiện tại:",
+        ],
+        seed
+      )
+    );
+    if (Number.isFinite(openTasks)) {
+      lines.push(
+        openTasks === 0
+          ? "- Tuyệt vời: không còn nhiệm vụ nào dở dang 🎉"
+          : `- Bạn còn ${openTasks} việc chưa xong${overdue ? `, mà **${overdue} việc đã qua hạn** — mình thấy cần xử lý cái này trước tiên` : ""}`
+      );
+    }
+    if (Number.isFinite(weeklyMinutes)) {
+      lines.push(
+        weeklyMinutes === 0
+          ? "- Tuần này chưa ghi nhận phiên học nào — một Pomodoro 25 phút hôm nay là bùng được nhịp lại"
+          : `- Tuần này bạn tập trung được **${fmtMin(weeklyMinutes)}**${
+              weeklyMinutes >= 300 ? " — nghiêm túc đấy, giữ lửa nhé 🔥" : weeklyMinutes < 60 ? " — hơi nhẹ, thử nhắm 30 phút mỗi ngày xem sao" : ""
+            }`
+      );
+    }
+    if (Number.isFinite(dueCards) && dueCards > 0) lines.push(`- Có ${dueCards} flashcard đến hạn hôm nay, SM-2 đã xếp sẵn thứ tự ôn rồi`);
+    if (progressByCourse.length > 0) {
+      lines.push(`- Tiến độ: ${progressByCourse.slice(0, 4).map((p) => `${clampText(p.course, 30)} ${clampText(p.tasks, 12)} việc`).join(", ")}`);
+    } else if (courseNames.length > 0) {
+      lines.push(`- Các môn đang học: ${courseNames.join(", ")}`);
+    }
+    if (weakest.length > 0) {
+      lines.push(`- Chương yếu nhất: **${clampText(asObj(weakest[0]).chapter, 40)}** (môn ${clampText(asObj(weakest[0]).course, 30)}) — nên đọc lại trước khi thi`);
+    }
+    const upExam = exams
+      .map((e) => ({
+        title: clampText(e.title, 40),
+        days: daysUntil(clampText(e.date, 12), today),
+      }))
+      .filter((e) => Number.isFinite(e.days) && e.days >= 0)
+      .sort((a, b) => a.days - b.days)[0];
+    if (upExam && upExam.title) {
+      lines.push(`- Kỳ thi gần nhất: **${upExam.title}** — ${upExam.days === 0 ? "thi ngay hôm nay!" : `còn ${upExam.days} ngày nữa`}`);
+    }
+
+    const closing =
+      overdue > 0
+        ? pick(
+            [
+              "Việc quá hạn là ưu tiên số 1 — mở Planner, làm ngay dòng đầu tiên trong hàng đợi là gỡ được. Chỉ cần 25 phút thôi 💪",
+              "Mình đề xuất: vào Planner → hàng đợi ưu tiên → xử lý việc quá hạn đầu tiên. Một Pomodoro là thấy khác liền.",
+            ],
+            seed + 1
+          )
+        : dueCards > 0
+          ? "Không quá nặng nhọc đâu — dành 10 phút lướt flashcard ở trang Ôn tập là giữ được nhịp hôm nay."
+          : "Muốn mình bày sẵn lịch cho 7 ngày tới không? Vào Planner → tab **AI** là có ngay.";
+    lines.push("", closing);
     return { text: lines.join("\n") + tail };
   }
 
   if (/kế\s*hoạch|học\s*gì|nên\s*làm|ưu\s*tiên|phân\s*công|lịch\s*học/.test(lastUser)) {
+    const first = Number.isFinite(openTasks) && openTasks > 0 ? `Hiện bạn có ${openTasks} việc đang mở — bắt đầu từ dòng đầu của hàng đợi Planner là chuẩn nhất (điểm số cao nhất theo thuật toán). ` : "";
     return {
       text:
-        "Mình xếp lịch bằng thuật toán (không cần API key):\n" +
-        "1. Trang **Lập kế hoạch** → tab **AI** → *Tạo kế hoạch* — chia mọi nhiệm vụ theo deadline, độ khó, độ quan trọng vào từng ngày.\n" +
-        "2. Hoặc tab **Tự động** — cùng thuật toán, nhanh gọn.\n\n" +
-        "Muốn hội thoại tự nhiên như ChatGPT? Thêm `GEMINI_API_KEY` vào biến môi trường server (README có 2 bước) — khi đó mọi câu hỏi đều do Gemini trả lời." +
+        pick(["Mình xếp lịch được luôn cho bạn — bằng thuật toán, không cần API key:", "Được chứ! Mình bày lịch như sau:"], seed) +
+        "\n" +
+        "1. Trang **Lập kế hoạch** → tab **AI** → *Tạo kế hoạch*: mình chia mọi việc theo deadline, độ khó, độ quan trọng vào từng ngày.\n" +
+        "2. Tab **Tự động** bên cạnh — cùng thuật toán, nhanh hơn.\n\n" +
+        first +
+        "Còn hội thoại tự nhiên kiểu ChatGPT thì cần Gemini — dán `GEMINI_API_KEY` vào Environment của service trên Render là xong (2 phút)." +
         tail,
     };
   }
@@ -416,27 +483,49 @@ export function localChat(input: LocalInput): LocalOutput {
   if (/thẻ|flashcard|ôn\s*tập|cách\s*nhớ|nhớ\s*lâu/.test(lastUser)) {
     return {
       text:
-        (Number.isFinite(dueCards) && dueCards > 0 ? `Bạn có **${dueCards} flashcard đến hạn** hôm nay. ` : "") +
-        "Tạo thẻ: Trợ lý AI → mode **Flashcard** (dán nội dung bài học, mình cắt thành thẻ) hoặc tự tạo ở trang **Ôn tập**.\n" +
-        "SM-2 sẽ tự xếp ngày ôn kế tiếp sau mỗi lượt đánh giá — thẻ nào bạn hay quên sẽ được ôn sớm hơn." +
+        (Number.isFinite(dueCards) && dueCards > 0
+          ? `Bạn đang có **${dueCards} thẻ đến hạn** hôm nay — lướt trang **Ôn tập** chừng 10 phút là dứt điểm. `
+          : "Chưa có thẻ nào đến hạn hôm nay, nhịp SM-2 đang thoải mái. ") +
+        "Muốn thêm thẻ mới: dán bài học vào mode **Flashcard** ở đây, mình tự cắt thành thẻ; hoặc tự viết ở trang Ôn tập.\n" +
+        "Mẹo nhỏ: thẻ nào bạn hay quên, SM-2 sẽ tự đưa lên sớm hơn — cứ đánh giá thật nhé 😄" +
         tail,
     };
   }
 
   if (/thi\b|kỳ\s*thi|đề\s|kiểm\s*tra|điểm/.test(lastUser) && exams.length > 0) {
+    const withDays = exams
+      .map((e) => ({
+        t: clampText(e.title, 50),
+        c: clampText(e.course, 30),
+        d: clampText(e.date, 12),
+        days: daysUntil(clampText(e.date, 12), today),
+      }))
+      .filter((e) => Number.isFinite(e.days) && e.days >= 0)
+      .sort((a, b) => a.days - b.days);
     const lines = [
-      "**Kỳ thi của bạn:**",
-      ...exams.slice(0, 5).map((e, i) => `${i + 1}. ${clampText(e.title, 50)}${e.course ? ` (${clampText(e.course, 30)})` : ""} — ${clampText(e.date, 12)}`),
+      pick(["Để mình điểm danh kỳ thi của bạn nhé:", "Kỳ thi sắp tới của bạn đây:"], seed),
+      ...withDays.slice(0, 5).map((e, i) => `${i + 1}. **${e.t}**${e.c ? ` (${e.c})` : ""} — ${e.d}${e.days === 0 ? " (hôm nay!)" : `, còn ${e.days} ngày`}`),
       "",
-      "Học hiệu quả cho kỳ thi: tạo trắc nghiệm từ ghi chú (mode **Trắc nghiệm**) và ôn flashcard đến hạn trước.",
+      withDays.length > 0 && withDays[0].days <= 7
+        ? `**${withDays[0].days === 0 ? "Thi ngay hôm nay" : `Còn ${withDays[0].days} ngày`}** — mình khuyên: ôn flashcard đến hạn trước, rồi làm vài câu trắc nghiệm từ ghi chú (mode **Trắc nghiệm**) để thử sức.`
+        : "Thời gian còn tương đối — chia nhỏ chương học vào Planner trước, gần ngày thi quay lại trắc nghiệm & flashcard.",
     ];
     return { text: lines.join("\n") + tail };
   }
 
   if (mentionsCourse) {
+    const prog = progressByCourse.find((p) => clampText(p.course, 60).toLowerCase() === mentionsCourse.toLowerCase());
     return {
       text:
-        `Về môn **${mentionsCourse}**: mình có thể tóm tắt ghi chú (mode **Tóm tắt**), tạo flashcard/trắc nghiệm từ nội dung bạn dán, và xem tiến độ ở trang **Môn học**. Dán ghi chú vào đây là mình xử lý ngay.` +
+        `À, bạn hỏi về **${mentionsCourse}**. ` +
+        (prog ? `Ở môn này bạn làm được ${clampText(prog.tasks, 12)} nhiệm vụ rồi — ` : "") +
+        pick(
+          [
+            "mình có thể giúp: tóm tắt ghi chú (dán bài vào mode **Tóm tắt**), cắt flashcard & trắc nghiệm từ nội dung đó, hoặc xếp lịch ôn ở Planner. Bạn muốn bắt đầu từ đâu?",
+            "muốn mình làm gì trước — tóm tắt ghi chú, tạo flashcard, hay bày lịch ôn cho môn này?",
+          ],
+          seed
+        ) +
         tail,
     };
   }
@@ -444,20 +533,40 @@ export function localChat(input: LocalInput): LocalOutput {
   if (/^(hi|hello|xin\s*chào|chào|alo|hế\s*lô|hey)\b/.test(lastUser)) {
     return {
       text:
-        "Chào bạn 👋 Mình là **AI cơ sở** của StudyOS — bản offline không cần API key.\n" +
-        "Mình làm được ngay: phân tích tiến độ học, tóm tắt ghi chú, tạo flashcard & trắc nghiệm từ nội dung bạn dán, xếp lịch 7 ngày theo thuật toán.\n" +
-        "Thử hỏi: “phân tích tiến độ của tôi” — hoặc bấm mode Tóm tắt rồi dán bài học vào!" +
+        pick(
+          [
+            "Chào bạn 👋 Hôm nay học thế nào rồi? Cứ hỏi “tình hình học của mình” là mình tóm tắt ngay — mình đọc được toàn bộ nhiệm vụ, phiên học, flashcard và kỳ thi của bạn.",
+            "Hi 👋 Mình đây. Muốn xem tình hình học hiện tại, tìm việc nên làm kế, hay dán bài học vào đây để mình tóm tắt/câu hỏi?",
+          ],
+          seed
+        ) + tail,
+    };
+  }
+
+  if (/cảm\s*ơn|thanks|thank\s*you/.test(lastUser)) {
+    return { text: pick(["Không có gì! Cần gì cứ hô mình nhé 😄", "Rất vui giúp được bạn — học tốt nhé 💪"], seed) + tail };
+  }
+
+  if (/bạn\s*là\s*ai|mày\s*là\s*ai|giới\s*thiệu\s*bản\s*thân/.test(lastUser)) {
+    return {
+      text:
+        "Mình là **AI cơ sở** của StudyOS — chạy trực tiếp trên server, không cần API key, và chỉ nói dựa trên dữ liệu thật trong app của bạn (không bịa).\n" +
+        "Mình giỏi nhất ở: tổng quan tiến độ, xếp lịch theo thuật toán, tóm tắt & tạo thẻ/câu hỏi từ bài bạn dán.\n" +
+        "Còn kiến thức tự do kiểu ChatGPT thì cần bộ não Gemini — bạn dán key vào Render Environment là mình 'nâng cấp' ngay." +
         tail,
     };
   }
 
   return {
     text:
-      "Ở chế độ **AI cơ sở** (offline) mình trả lời chính xác các câu về **dữ liệu học tập của bạn**:\n" +
-      "- “phân tích tiến độ của tôi” — tổng quan nhiệm vụ, thời gian học, flashcard\n" +
-      "- “kế hoạch học bây giờ” — hướng dẫn xếp lịch theo thuật toán\n" +
-      "- “kỳ thi của tôi” — danh sách thi sắp tới\n\n" +
-      "Hỏi kiến thức tổng quát (không có trong dữ liệu) cần bộ não **Gemini**: thêm `GEMINI_API_KEY` vào biến môi trường server — lấy miễn phí tại aistudio.google.com/apikey (README có 2 bước)." +
+      pick(
+        [
+          "Câu này ngoài phạm vi dữ liệu app của mình rồi 🙈 Mình đọc được: nhiệm vụ, phiên học, flashcard, kỳ thi, chương học. Thử hỏi “tình hình học của mình” xem!",
+          "Mình chưa xử lý được câu này — mình là AI offline, trả lời chắc nhất khi hỏi về tiến độ, kế hoạch, kỳ thi, flashcard.",
+        ],
+        seed
+      ) +
+      "\n\nCòn muốn hỏi tự do như ChatGPT (giải thích khái niệm, kiến thức tổng quát)? Chỉ cần **GEMINI_API_KEY**: tạo miễn phí ở aistudio.google.com/apikey → Render → service webbaitap → Environment → dán key → Save. 2 phút, không cần sửa code." +
       tail,
   };
 }
