@@ -121,6 +121,7 @@ interface SearchHit {
   source: string;
   title: string;
   when?: string;
+  snippet?: string;
 }
 
 /** fetch văn bản có deadline, lỗi → null */
@@ -145,17 +146,37 @@ const decodeEnt = (s: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
+const stripTags = (s: string) =>
+  decodeEnt(s.replace(/<[^>]+>/g, " "));
+
 async function webSearch(query: string): Promise<SearchHit[]> {
   const enc = encodeURIComponent(query.replace(/[^\p{L}\p{N}\s?]/gu, " ").trim().slice(0, 120));
-  const [newsRaw, ddgRaw] = await Promise.all([
+  const [newsRaw, bingRaw, ddgRaw] = await Promise.all([
     fetchText(`https://news.google.com/rss/search?q=${enc}&hl=vi&gl=VN&ceid=VN:vi`, 6000),
+    // Bing RSS trả kèm <description> = đoạn trích nội dung (thường chứa con số cụ thể)
+    fetchText(`https://www.bing.com/search?q=${enc}&format=rss&count=8&setlang=vi`, 7000),
     fetchText(`https://api.duckduckgo.com/?q=${enc}&format=json&no_html=1&no_redirect=1`, 6000),
   ]);
   const hits: SearchHit[] = [];
 
+  // Bing RSS — snippet có nội dung thật (con số, mốc thời gian)
+  if (bingRaw) {
+    const items = bingRaw.split("<item>").slice(1, 6);
+    for (const it of items) {
+      const title = stripTags(/<title>([\s\S]*?)<\/title>/.exec(it)?.[1] ?? "");
+      if (!title) continue;
+      const desc = stripTags(/<description>([\s\S]*?)<\/description>/.exec(it)?.[1] ?? "");
+      hits.push({
+        source: "Bing tìm kiếm",
+        title: title.slice(0, 140),
+        snippet: desc ? desc.slice(0, 220) : undefined,
+      });
+    }
+  }
+
   // Google Tin tức RSS
   if (newsRaw) {
-    const items = newsRaw.split("<item>").slice(1, 8);
+    const items = newsRaw.split("<item>").slice(1, 6);
     for (const it of items) {
       const title = decodeEnt(/<title>([\s\S]*?)<\/title>/.exec(it)?.[1] ?? "");
       if (!title) continue;
@@ -354,9 +375,11 @@ export async function POST(req: NextRequest) {
         const hits = await webSearch(last.content || "");
         if (hits.length > 0) {
           system +=
-            "\n\nKẾT QUẢ TÌM KIẾM WEB vừa lấy (tin thật từ báo VN, kèm mốc thời gian):\n" +
-            hits.map((h) => `- [${h.source}] ${h.title}${h.when ? ` (${h.when})` : ""}`).join("\n") +
-            "\nQUY TẮC BẮT BUỘC: nếu kết quả trên chứa con số/thông tin liên quan câu hỏi → PHẢI đưa con số/thông tin đó vào câu trả lời, kèm mốc thời gian và nguồn (vd: 'theo [Báo X], ngày d/m'). TUYỆT ĐỐI không né tránh kiểu 'không có công cụ tra cứu' — bạn CÓ dữ liệu tìm kiếm trong tay. Chỉ nói thiếu số khi kết quả thật sự không chứa số, và khi đó gợi ý nguồn để người dùng tự tra.";
+            "\n\nKẾT QUẢ TÌM KIẾM WEB vừa lấy (tin thật, snippet là nội dung bài viết):\n" +
+            hits
+              .map((h) => `- [${h.source}] ${h.title}${h.when ? ` (${h.when})` : ""}${h.snippet ? ` — ${h.snippet}` : ""}`)
+              .join("\n") +
+            "\nQUY TẮC BẮT BUỘC: người dùng muốn SỐ LIỆU CHÍNH XÁC, không muốn câu trả lời chung chung. Nếu kết quả trên có con số → trích THẲNG con số đó vào câu trả lời (kèm đơn vị, mốc thời gian, nguồn, vd: 'theo [Báo X] ngày d/m, giá là X đồng'). Trình bày rõ từng mục. Chỉ gợi ý nguồn tự tra khi kết quả thật sự không chứa con số — và khi đó cũng tóm tắt diễn biến từ tin đã có. TUYỆT ĐỐI không né tránh kiểu 'không có công cụ tra cứu' — bạn CÓ dữ liệu tìm kiếm trong tay.";
         }
       }
       // Dữ liệu học tập thật từ app (nhiệm vụ, kỳ thi, tiến độ…) → Gemini trả lời cá nhân hoá
