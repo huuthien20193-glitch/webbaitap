@@ -162,7 +162,12 @@ async function callGemini(system: string, turns: Turn[], json: boolean, apiKey: 
       if (res.status === 400 && detail.toLowerCase().includes("api key")) {
         throw new Error("API key Gemini không hợp lệ");
       }
-      if (res.status === 429) throw new Error("AI đang quá tải (rate limit), thử lại sau ít phút");
+      if (res.status === 429) {
+        // Hết quota phút này trên model này → bucket quota của model khác có thể còn, thử model kế
+        lastDetail = "rate limit (429)";
+        sawBusy = true;
+        continue;
+      }
       if (res.status === 404 || res.status === 503) {
         lastDetail = detail || res.statusText;
         sawBusy = sawBusy || res.status === 503;
