@@ -111,6 +111,79 @@ function extractJson(text: string): { data: unknown; error?: string } {
   }
 }
 
+/* ── Web search miễn phí (không cần key) — AI tự tìm khi câu hỏi cần dữ liệu mới ── */
+
+/** Tín hiệu câu hỏi cần dữ liệu thời gian thực/web */
+const SEARCH_WORDS =
+  /hôm\s*nay|hiện\s*tại|bây\s*giờ|tuần\s*này|tháng\s*này|năm\s*\d{4}|mới\s*nhất|vừa\s*ra|giá\s|tỷ\s*giá|thời\s*tiết|xổ\s*số|kết\s*quả|tin\s*(tức|nóng)|chứng\s*khoán|vàng|bitcoin|crypto|bão|thời\s*sự|phát\s*hành|hạ\s*máy|tử\s*vi|giải\s*trí|bóng\s*đá|trận|ngoại\s*hạng/i;
+
+interface SearchHit {
+  source: string;
+  title: string;
+  when?: string;
+}
+
+/** fetch văn bản có deadline, lỗi → null */
+async function fetchText(url: string, ms: number): Promise<string | null> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(ms), headers: { "User-Agent": "StudyFlowApp/1.0 (+studyos)" } });
+    if (!res.ok) return null;
+    return await res.text();
+  } catch {
+    return null;
+  }
+}
+
+const decodeEnt = (s: string) =>
+  s
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+
+async function webSearch(query: string): Promise<SearchHit[]> {
+  const enc = encodeURIComponent(query.replace(/[^\p{L}\p{N}\s?]/gu, " ").trim().slice(0, 120));
+  const [newsRaw, ddgRaw] = await Promise.all([
+    fetchText(`https://news.google.com/rss/search?q=${enc}&hl=vi&gl=VN&ceid=VN:vi`, 6000),
+    fetchText(`https://api.duckduckgo.com/?q=${enc}&format=json&no_html=1&no_redirect=1`, 6000),
+  ]);
+  const hits: SearchHit[] = [];
+
+  // Google Tin tức RSS
+  if (newsRaw) {
+    const items = newsRaw.split("<item>").slice(1, 5);
+    for (const it of items) {
+      const title = decodeEnt(/<title>([\s\S]*?)<\/title>/.exec(it)?.[1] ?? "");
+      if (!title) continue;
+      const src = decodeEnt(/<source[^>]*>([\s\S]*?)<\/source>/.exec(it)?.[1] ?? "") || "Google Tin tức";
+      const when = decodeEnt(/<pubDate>([\s\S]*?)<\/pubDate>/.exec(it)?.[1] ?? "");
+      const d = when ? new Date(when) : null;
+      hits.push({
+        source: src,
+        title: title.slice(0, 120),
+        when: d && !isNaN(d.getTime()) ? `${d.getDate()}/${d.getMonth() + 1}` : undefined,
+      });
+    }
+  }
+
+  // DuckDuckGo Instant Answer (định nghĩa nhanh)
+  if (ddgRaw) {
+    try {
+      const j = JSON.parse(ddgRaw) as { AbstractText?: string; AbstractSource?: string; Answer?: string; RelatedTopics?: { Text?: string }[] };
+      if (j.Answer) hits.unshift({ source: "DuckDuckGo", title: `Đáp án nhanh: ${j.Answer}`.slice(0, 140) });
+      else if (j.AbstractText) hits.unshift({ source: j.AbstractSource || "DuckDuckGo", title: j.AbstractText.slice(0, 160) });
+      else for (const t of (j.RelatedTopics ?? []).slice(0, 2)) if (t.Text) hits.push({ source: "DuckDuckGo", title: t.Text.slice(0, 160) });
+    } catch {
+      /* ignore */
+    }
+  }
+  return hits.slice(0, 6);
+}
+
 /* ── Gemini call ───────────────────────────────────────────── */
 
 interface Turn {
@@ -255,6 +328,7 @@ export async function POST(req: NextRequest) {
   /* ── Có key → Gemini ── */
   try {
     const turns: Turn[] = [];
+    let system = MODE_PROMPT[mode];
 
     if (mode === "chat") {
       if (messages.length === 0) return NextResponse.json({ error: "Thiếu nội dung trò chuyện" }, { status: 400 });
@@ -274,6 +348,16 @@ export async function POST(req: NextRequest) {
         turns.push({ role: m.role === "assistant" ? "model" : "user", text: m.content });
       }
       turns.push({ role: "user", text: last.content || "(trống)" });
+      // Câu hỏi cần dữ liệu mới → tự tìm web (miễn phí, không key nào cả),
+      // đưa kết quả vào prompt để Gemini tổng hợp và nêu nguồn.
+      if (SEARCH_WORDS.test(last.content || "")) {
+        const hits = await webSearch(last.content || "");
+        if (hits.length > 0) {
+          system +=
+            "\n\nKẾT QUẢ TÌM KIẾM WEB vừa lấy (dùng khi giúp trả lời được, có thể thiếu/không liên quan; khi dùng thì nêu nguồn trong ngoặc; nếu mâu thuẫn với kiến thức của bạn thì nói rõ):\n" +
+            hits.map((h) => `- [${h.source}] ${h.title}${h.when ? ` (${h.when})` : ""}`).join("\n");
+        }
+      }
     } else {
       const prompt = trunc(body.prompt, 2000);
       const ctx = trunc(body.context ?? "", 5000);
@@ -283,7 +367,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const text = await callGemini(MODE_PROMPT[mode], turns, jsonMode, apiKey);
+    const text = await callGemini(system, turns, jsonMode, apiKey);
 
     if (jsonMode) {
       const parsed = extractJson(text);
