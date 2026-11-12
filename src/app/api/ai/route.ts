@@ -210,6 +210,15 @@ interface AIBody {
   apiKey?: unknown;
 }
 
+/**
+ * GET /api/ai — báo server đã cấu hình key Gemini chưa (boolean, KHÔNG trả key).
+ * UI dùng để hiện badge "AI Pro" mặc định khi key nằm ở biến môi trường (Render env):
+ * có env GEMINI_API_KEY → mọi người dùng được Gemini ngay từ đầu, không cần dán key.
+ */
+export async function GET() {
+  return NextResponse.json({ serverKey: Boolean(API_KEY) });
+}
+
 export async function POST(req: NextRequest) {
   let body: AIBody | null = null;
   try {

@@ -69,13 +69,20 @@ export default function AssistantPage() {
 
   const [cardsPreview, setCardsPreview] = useState<FlashcardDraft[] | null>(null);
 
-  /* AI Pro (BYOK): key cá nhân lưu localStorage, gửi kèm từng request */
+  /* AI Pro (BYOK): key cá nhân lưu localStorage, gửi kèm từng request.
+     serverPro: server đã có key ở biến môi trường (Render env) → mọi người được Pro từ đầu. */
   const [keyModal, setKeyModal] = useState(false);
   const [storedKey, setStoredKey] = useState("");
   const [keyInput, setKeyInput] = useState("");
   const [keySaving, setKeySaving] = useState(false);
+  const [serverPro, setServerPro] = useState(false);
+  const proActive = Boolean(storedKey) || serverPro;
   useEffect(() => {
     setStoredKey(getStoredApiKey());
+    fetch("/api/ai")
+      .then((r) => r.json())
+      .then((j) => setServerPro(Boolean(j?.serverKey)))
+      .catch(() => setServerPro(false));
   }, []);
 
   /* Mở đường chạy nhanh từ Course Manager: /assistant?create=flashcards&course=... */
@@ -464,7 +471,7 @@ export default function AssistantPage() {
                     <Button variant="secondary" className="text-xs" onClick={() => void analyze()}>
                       <BrainCircuit className="h-3.5 w-3.5 text-violet-500" /> Phân tích tiến độ của tôi
                     </Button>
-                    {storedKey ? (
+                    {proActive ? (
                       <button
                         onClick={() => setKeyModal(true)}
                         className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-500/15 dark:text-emerald-400"
@@ -582,7 +589,7 @@ export default function AssistantPage() {
                 </Button>
               </form>
               <p className="mt-2 text-[11px] text-muted">AI có thể nhầm lẫn — hãy kiểm chứng thông tin quan trọng trước khi áp dụng.</p>
-              {!storedKey && (
+              {!proActive && (
                 <button
                   onClick={() => setKeyModal(true)}
                   className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-amber-600 transition-colors hover:text-amber-700 dark:text-amber-400"
