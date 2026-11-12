@@ -14,12 +14,25 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const API_KEY = process.env.GEMINI_API_KEY;
-const MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+/** Model mặc định: "gemini-flash-latest" là alias tự trỏ tới Flash mới nhất — không bao giờ bị retire.
+ *  Có env GEMINI_MODEL thì override. Chuỗi fallback chặn trường hợp model bị Google ngừng phục vụ (404). */
+const MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
+const MODEL_CHAIN: string[] = [
+  ...new Set([
+    MODEL,
+    "gemini-flash-latest",
+    "gemini-3.8-flash",
+    // Model Lite: vùng sức chứa free-tier riêng, vẫn đáp ứng khi Flash chính nghẽn 503/treo (probe 12/11)
+    "gemini-flash-lite-latest",
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash-lite",
+  ]),
+];
 
-/** Key cá nhân người dùng dán trong app (BYOK) — ưu tiên hơn key env nếu có */
+/** Key cá nhân người dùng dán trong app (BYOK) — ưu tiên hơn key env nếu có. Chấp nhận "AIza…" lẫn "AQ.Ab8…" */
 function resolveKey(bodyApiKey: unknown): string {
   const k = typeof bodyApiKey === "string" ? bodyApiKey.trim() : "";
-  if (k.length >= 30 && k.length <= 80 && /^[A-Za-z0-9_-]+$/.test(k)) return k;
+  if (k.length >= 30 && k.length <= 120 && /^[A-Za-z0-9_.-]+$/.test(k)) return k;
   return API_KEY ?? "";
 }
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
@@ -105,23 +118,39 @@ interface Turn {
 }
 
 async function callGemini(system: string, turns: Turn[], json: boolean, apiKey: string): Promise<string> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 50_000);
-  try {
-    const res = await fetch(`${ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: system }] },
-        contents: turns.map((t) => ({ role: t.role, parts: [{ text: t.text }] })),
-        generationConfig: {
-          temperature: json ? 0.6 : 0.9,
-          maxOutputTokens: 2048,
-          ...(json ? { responseMimeType: "application/json" } : {}),
-        },
-      }),
-    });
+  const started = Date.now();
+  let lastDetail = "";
+  let sawBusy = false;
+  // Chuỗi model fallback: 404 (bị retire) hoặc 503/treo (quá tải) → thử model kế tiếp.
+  for (const model of MODEL_CHAIN) {
+    const elapsed = Date.now() - started;
+    if (elapsed > 38_000) break; // giữ tổng thời gian dưới trần 50s
+    const cap = Math.min(15_000, 42_000 - (Date.now() - started));
+    if (cap < 3_000) break;
+    let res: Response;
+    try {
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(cap),
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents: turns.map((t) => ({ role: t.role, parts: [{ text: t.text }] })),
+          generationConfig: {
+            temperature: json ? 0.6 : 0.9,
+            maxOutputTokens: 2048,
+            ...(json ? { responseMimeType: "application/json" } : {}),
+          },
+        }),
+      });
+    } catch (e) {
+      // Treo/timeout model này → coi như quá tải, thử model kế
+      if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) {
+        sawBusy = true;
+        continue;
+      }
+      throw e;
+    }
     if (!res.ok) {
       let detail = "";
       try {
@@ -134,6 +163,11 @@ async function callGemini(system: string, turns: Turn[], json: boolean, apiKey: 
         throw new Error("API key Gemini không hợp lệ");
       }
       if (res.status === 429) throw new Error("AI đang quá tải (rate limit), thử lại sau ít phút");
+      if (res.status === 404 || res.status === 503) {
+        lastDetail = detail || res.statusText;
+        sawBusy = sawBusy || res.status === 503;
+        continue;
+      }
       throw new Error(`Lỗi AI (${res.status}): ${detail || res.statusText}`);
     }
     const j = await res.json();
@@ -142,9 +176,9 @@ async function callGemini(system: string, turns: Turn[], json: boolean, apiKey: 
       .join("");
     if (typeof text !== "string" || text.trim() === "") throw new Error("AI trả về kết quả trống");
     return text.slice(0, MAX_OUTPUT);
-  } finally {
-    clearTimeout(timeout);
   }
+  if (sawBusy) throw new Error("Gemini đang quá tải (free tier) — thử lại sau vài phút nhé");
+  throw new Error(lastDetail || "Gemini không phản hồi");
 }
 
 /* ── Handler ───────────────────────────────────────────────── */

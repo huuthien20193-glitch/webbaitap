@@ -7,10 +7,10 @@
 
 const STORAGE_KEY = "studyos.geminiKey";
 
-/** Format key Gemini: bắt đầu "AIza", ~39 ký tự; cho phép dịu hơn để không chặn key tương lai */
+/** Format key Gemini: dạng cũ "AIza…" (~39 ký tự) hoặc mới "AQ.Ab8…" (có dấu chấm); cho phép dịu để không chặn format tương lai */
 export function looksLikeApiKey(key: string): boolean {
   const k = key.trim();
-  return /^[A-Za-z0-9_-]{30,80}$/.test(k);
+  return /^[A-Za-z0-9_.-]{30,120}$/.test(k);
 }
 
 export function getStoredApiKey(): string {
