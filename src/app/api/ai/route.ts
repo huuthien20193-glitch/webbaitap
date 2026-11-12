@@ -75,7 +75,7 @@ const CHAT_PROMPT =
   "Phạm vi: trả lời MỌI chủ đề — học tập, lập trình, khoa học, toán, nấu ăn, sức khỏe, thể thao, giải đố, viết lách, đời sống, trò chuyện tâm tình… KHÔNG giới hạn ở học tập và KHÔNG từ chối câu hỏi vì 'ngoài chuyên môn'.\n" +
   "Phong cách: tự nhiên, ấm áp, xưng \"mình\" — gọi người dùng là \"bạn\", dùng emoji vừa phải, không sáo rỗng, không dài dòng vô ích.\n" +
   "Khi DỮ LIỆU HỌC TẬP được cung cấp và câu hỏi liên quan, hãy dùng số liệu thật (nhiệm vụ, kỳ thi, tiến độ…) để trả lời cá nhân hoá; không bịa thêm số liệu không có.\n" +
-  "Kiến thức hiện tại: nếu được hỏi về tin tức/sự kiện rất mới xảy ra sau thời điểm kiến thức của bạn, hãy nói thẳng mình không có dữ liệu cập nhật realtime.\n" +
+  "Kiến thức hiện tại: câu hỏi cần tin mới sẽ được server cung cấp KẾT QUẢ TÌM KIẾM WEB trong prompt — khi thấy, hãy dựa vào đó để trả lời (kèm nguồn trong ngoặc); chỉ nói không có dữ liệu realtime khi kết quả tìm kiếm thật sự không đủ.\n" +
   "Khi người dùng muốn TẠO nhiệm vụ / môn học / kỳ thi / thẻ ghi nhớ hay đánh dấu hoàn thành: nếu họ chưa gõ đúng mẫu lệnh, hướng dẫn ngắn gọn mẫu lệnh để dùng trong khung chat, ví dụ: \"tạo nhiệm vụ Làm lab 3 hạn mai 45 phút\" hoặc \"việc Đọc chương 2 xong rồi\".\n" +
   "Trả lời bằng tiếng Việt, có cấu trúc (gạch đầu dòng, **đậm** từ khoá chính), câu trả lời vừa đủ chi tiết — không lan man.";
 
@@ -155,7 +155,7 @@ async function webSearch(query: string): Promise<SearchHit[]> {
 
   // Google Tin tức RSS
   if (newsRaw) {
-    const items = newsRaw.split("<item>").slice(1, 5);
+    const items = newsRaw.split("<item>").slice(1, 8);
     for (const it of items) {
       const title = decodeEnt(/<title>([\s\S]*?)<\/title>/.exec(it)?.[1] ?? "");
       if (!title) continue;
@@ -164,7 +164,7 @@ async function webSearch(query: string): Promise<SearchHit[]> {
       const d = when ? new Date(when) : null;
       hits.push({
         source: src,
-        title: title.slice(0, 120),
+        title: title.slice(0, 140),
         when: d && !isNaN(d.getTime()) ? `${d.getDate()}/${d.getMonth() + 1}` : undefined,
       });
     }
@@ -181,7 +181,7 @@ async function webSearch(query: string): Promise<SearchHit[]> {
       /* ignore */
     }
   }
-  return hits.slice(0, 6);
+  return hits.slice(0, 8);
 }
 
 /* ── Gemini call ───────────────────────────────────────────── */
@@ -354,8 +354,9 @@ export async function POST(req: NextRequest) {
         const hits = await webSearch(last.content || "");
         if (hits.length > 0) {
           system +=
-            "\n\nKẾT QUẢ TÌM KIẾM WEB vừa lấy (dùng khi giúp trả lời được, có thể thiếu/không liên quan; khi dùng thì nêu nguồn trong ngoặc; nếu mâu thuẫn với kiến thức của bạn thì nói rõ):\n" +
-            hits.map((h) => `- [${h.source}] ${h.title}${h.when ? ` (${h.when})` : ""}`).join("\n");
+            "\n\nKẾT QUẢ TÌM KIẾM WEB vừa lấy (tin thật từ báo VN, kèm mốc thời gian):\n" +
+            hits.map((h) => `- [${h.source}] ${h.title}${h.when ? ` (${h.when})` : ""}`).join("\n") +
+            "\nQUY TẮC BẮT BUỘC: nếu kết quả trên chứa con số/thông tin liên quan câu hỏi → PHẢI đưa con số/thông tin đó vào câu trả lời, kèm mốc thời gian và nguồn (vd: 'theo [Báo X], ngày d/m'). TUYỆT ĐỐI không né tránh kiểu 'không có công cụ tra cứu' — bạn CÓ dữ liệu tìm kiếm trong tay. Chỉ nói thiếu số khi kết quả thật sự không chứa số, và khi đó gợi ý nguồn để người dùng tự tra.";
         }
       }
     } else {
