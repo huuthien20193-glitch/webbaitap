@@ -211,7 +211,7 @@ async function callGemini(system: string, turns: Turn[], json: boolean, apiKey: 
           systemInstruction: { parts: [{ text: system }] },
           contents: turns.map((t) => ({ role: t.role, parts: [{ text: t.text }] })),
           generationConfig: {
-            temperature: json ? 0.6 : 0.9,
+            temperature: json ? 0.6 : 0.7, // 0.7: nghe instruction (đưa số, trích nguồn) chắc hơn 0.9, vẫn tự nhiên
             maxOutputTokens: 2048,
             ...(json ? { responseMimeType: "application/json" } : {}),
           },
