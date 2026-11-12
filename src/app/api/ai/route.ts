@@ -359,6 +359,13 @@ export async function POST(req: NextRequest) {
             "\nQUY TẮC BẮT BUỘC: nếu kết quả trên chứa con số/thông tin liên quan câu hỏi → PHẢI đưa con số/thông tin đó vào câu trả lời, kèm mốc thời gian và nguồn (vd: 'theo [Báo X], ngày d/m'). TUYỆT ĐỐI không né tránh kiểu 'không có công cụ tra cứu' — bạn CÓ dữ liệu tìm kiếm trong tay. Chỉ nói thiếu số khi kết quả thật sự không chứa số, và khi đó gợi ý nguồn để người dùng tự tra.";
         }
       }
+      // Dữ liệu học tập thật từ app (nhiệm vụ, kỳ thi, tiến độ…) → Gemini trả lời cá nhân hoá
+      const studyCtx = trunc(JSON.stringify(body.context ?? {}), 1600);
+      if (studyCtx && studyCtx !== "{}") {
+        system +=
+          "\n\nDỮ LIỆU HỌC TẬP THẬT CỦA NGƯỜI DÙNG (JSON từ app — dùng khi câu hỏi liên quan, vd xếp lịch/tiến độ; KHÔNG bịa thêm số liệu không có):\n" +
+          studyCtx;
+      }
     } else {
       const prompt = trunc(body.prompt, 2000);
       const ctx = trunc(body.context ?? "", 5000);
