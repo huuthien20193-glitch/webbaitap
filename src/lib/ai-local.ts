@@ -869,10 +869,10 @@ export function localChat(input: LocalInput): LocalOutput {
   if (/bạn\s*là\s*ai|mày\s*là\s*ai|giới\s*thiệu\s*bản\s*thân|bạn\s*làm\s*được\s*gì|giúp\s*được\s*gì|chức\s*năng\s*gì|biết\s*làm\s*gì|khả\s*năng/.test(lastUser)) {
     return {
       text:
-        "Mình là **StudyOS AI** 🤖\n" +
-        "- Ở chế độ hiện tại (AI cơ sở), mình chạy trực tiếp trên server, đọc dữ liệu thật của bạn: nhiệm vụ, phiên học, flashcard, kỳ thi — không bịa.\n" +
+        "Mình là **trợ lý AI đa năng** của StudyFlow 🤖\n" +
+        "- Ở chế độ hiện tại (AI cơ sở), mình chạy trực tiếp trên server, đọc dữ liệu thật của bạn: nhiệm vụ, phiên học, flashcard, kỳ thi — không bịa; ngoài ra làm được máy tính, giờ VN, tung xu, giải thích phương pháp học.\n" +
         "- Mình còn **làm trực tiếp** được: “tạo nhiệm vụ X hạn mai”, “việc X xong rồi”, “tạo môn học X”…\n" +
-        "- Muốn mình trò chuyện tự do kiểu ChatGPT (giải thích khái niệm bất kỳ, giải bài, tư vấn sâu)? Dán **Gemini key** miễn phí trong app — nút “Nâng cấp AI” ở khung chat, 2 phút là xong." +
+        "- Khi app có **bộ não Gemini** (key server hoặc key cá nhân của bạn), mình hỏi gì trả lời nấy như ChatGPT — mọi chủ đề, không chỉ học tập." +
         tail,
     };
   }
@@ -887,13 +887,13 @@ export function localChat(input: LocalInput): LocalOutput {
     text:
       pick(
         [
-          "Câu này mình chưa xử lý được ở chế độ AI cơ sở 🙈 Mình chắc nhất khi hỏi về tiến độ, kế hoạch, kỳ thi, flashcard — hoặc phương pháp học (thử “học sao cho nhớ lâu?”).",
-          "Ngoài phạm vi dữ liệu app rồi 🙈 Thử hỏi “tình hình học của mình”, “hôm nay nên làm gì”, hoặc mẹo học nhé!",
+          "Câu này hay đấy — nhưng chế độ **AI cơ sở** (không key) của mình chỉ đủ máy móc để đọc dữ liệu app + vài kỹ năng sẵn có (giờ, tính toán, phương pháp học), chưa đủ bộ não trả lời tự do câu này 🙈",
+          "Mình xin phép nói thật: câu này cần bộ não Gemini mà app đang chạy **AI cơ sở** — mình không đoán mò để bịa cho bạn đâu 🙈",
         ],
         seed
       ) +
-      "\n\nMình **làm trực tiếp** được trong app: “tạo nhiệm vụ X hạn mai”, “việc X xong rồi”, “tạo môn học X”, “tạo kỳ thi X hạn 25/11”, “tạo thẻ hỏi: … đáp: …”.\n" +
-      "Còn muốn hỏi tự do kiểu ChatGPT (giải thích khái niệm bất kỳ, giải bài)? Mở nút **Nâng cấp AI** ở khung chat → dán Gemini key miễn phí (lấy tại aistudio.google.com/apikey) → xong." +
+      "\n\n**Mình làm tốt ngay bây giờ** (không cần gì thêm): “tình hình học của mình”, “xếp giúp mình lịch học”, “tạo nhiệm vụ X hạn mai 45 phút”, “việc X xong rồi”, “giờ VN là mấy giờ”, “345*12+88”, “tung đồng xu”, “SM-2 là gì”…\n" +
+      "Còn **hỏi gì trả lời nấy như ChatGPT** (kể cả nấu ăn, code, đời sống, giải bài bất kỳ)? Chỉ cần bộ não Gemini: nút **Nâng cấp AI** ở khung chat → dán key miễn phí (aistudio.google.com/apikey) — hoặc chủ app thêm key vào server là mọi người được Pro ngay." +
       tail,
   };
 }
